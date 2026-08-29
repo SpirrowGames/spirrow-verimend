@@ -1,10 +1,23 @@
 """Forward-only SQLite migration runner.
 
 Each migration is a ``NNNN_name.sql`` file in ``verimend/db/migrations``,
-applied in filename order inside a single transaction and recorded in the
-``schema_migration`` bookkeeping table. Applying an already-applied migration
-is a no-op, so ``apply_migrations`` is idempotent: running it against an
-up-to-date database returns an empty list and changes nothing.
+applied in filename order and recorded in the ``schema_migration``
+bookkeeping table. An already-recorded migration is skipped, so
+``apply_migrations`` is idempotent: running it against an up-to-date
+database returns an empty list and changes nothing.
+
+**Requirement: every migration script must itself be safe to re-run.**
+A script is handed to ``sqlite3.Connection.executescript``, which commits any
+pending transaction before it starts and opens no transaction of its own
+unless the script does. So the script and the ``schema_migration`` row that
+records it are *not* one atomic unit: a script that fails part-way leaves the
+statements before the failure applied but the migration unrecorded, and the
+next run will replay it from the top. Re-runnable statements
+(``CREATE TABLE IF NOT EXISTS``, ``CREATE INDEX IF NOT EXISTS``, DML guarded
+by ``WHERE NOT EXISTS`` / ``INSERT OR IGNORE``) turn that into a second
+attempt; statements that are not re-runnable turn it into a manual repair.
+The same requirement is stated in ``migrations/README.md``, where the next
+person to add a ``.sql`` file will actually read it.
 
 Only the tables the M1 collector actually writes exist so far (``crawl_run``
 and ``fact``). ``claim`` / ``verdict`` / ``metric`` from docs/design.md
@@ -54,7 +67,13 @@ def pending_migrations(conn: sqlite3.Connection) -> list[str]:
 
 
 def apply_migrations(conn: sqlite3.Connection) -> list[str]:
-    """Apply every pending migration. Returns the versions applied, in order."""
+    """Apply every pending migration. Returns the versions applied, in order.
+
+    A migration is applied and recorded before the next one is attempted. The
+    script and its ``schema_migration`` row are not a single transaction --
+    ``executescript`` will not allow that -- which is why every script has to
+    be re-runnable (see the module docstring and ``migrations/README.md``).
+    """
     applied = _applied(conn)
     newly_applied: list[str] = []
     for version, path in _available():

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from verimend.db import apply_migrations, connect, migrate, pending_migrations
+from verimend.db.migrate import MIGRATIONS_DIR
 
 EXPECTED_TABLES = {"crawl_run", "fact", "schema_migration"}
 
@@ -106,6 +107,27 @@ def test_fact_requires_an_existing_run(tmp_path: Path) -> None:
                 "INSERT INTO fact (run_id, source_kind, source_ref, content, content_hash)"
                 " VALUES (999, 'file', 'README.md', 'text', 'hash')"
             )
+
+
+def test_migration_scripts_are_rerunnable(tmp_path: Path) -> None:
+    """Every script must survive a replay -- see migrations/README.md.
+
+    ``executescript`` cannot wrap a script and its ``schema_migration`` row in
+    one transaction, so a script that fails half-way is replayed in full by the
+    next run. Re-runnability is what makes that recoverable, so it is a
+    requirement of the format rather than a property of today's single file.
+    """
+    scripts = sorted(MIGRATIONS_DIR.glob("*.sql"))
+    assert scripts, "no migration scripts found"
+
+    db = tmp_path / "verimend.sqlite3"
+    with connect(db) as conn:
+        for script in scripts:
+            sql = script.read_text(encoding="utf-8")
+            conn.executescript(sql)
+            before = _tables(conn)
+            conn.executescript(sql)  # replay: must not raise
+            assert _tables(conn) == before
 
 
 def test_downstream_tables_are_not_created_yet(tmp_path: Path) -> None:
