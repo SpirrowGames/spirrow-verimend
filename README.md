@@ -25,4 +25,7 @@ Verimend crawls the Spirrow products, detects drift between reality (code, confi
 
 ## Status
 
-Design phase. See [docs/design.md](docs/design.md) (Japanese).
+Implementation, milestone M1. The service scaffold is in place: FastAPI on :8118 with `/health`,
+SQLite migrations for `crawl_run` / `fact`, and crawl targets declared in
+[config/targets.yaml](config/targets.yaml). The collector, extractor, reconciler, and mender are not
+built yet. See [docs/design.md](docs/design.md) (Japanese).
