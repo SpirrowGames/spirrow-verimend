@@ -27,6 +27,8 @@ section 4 arrive as later migrations, when the code that writes them does.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,7 +42,7 @@ CREATE TABLE IF NOT EXISTS schema_migration (
 """
 
 
-def connect(db_path: Path | str) -> sqlite3.Connection:
+def _open(db_path: Path | str) -> sqlite3.Connection:
     """Open a connection, creating the parent directory when needed."""
     path = Path(db_path)
     if path.parent and str(path) != ":memory:":
@@ -49,6 +51,33 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+@contextmanager
+def connection(db_path: Path | str) -> Iterator[sqlite3.Connection]:
+    """Open ``db_path`` for the duration of the block, then close it.
+
+    A ``sqlite3.Connection`` is itself a context manager, but ``with conn:``
+    scopes a *transaction*, not the connection: it commits or rolls back and
+    leaves the connection -- and its file handle -- open. Handing out a bare
+    connection therefore invites ``with <opener>(...) as conn:``, which reads
+    like resource management and silently leaks the handle until the garbage
+    collector happens to run. That is why ``_open`` is private.
+
+    So this wrapper, rather than a bare opener, is how the package hands out a
+    connection: both scopes end together. The block commits on success and
+    rolls back on failure, and the connection is closed either way.
+
+    The leak this replaces was not academic on Windows, where a still-open
+    handle makes the database file undeletable (``WinError 32``) -- a test
+    using ``tmp_path`` then fails in cleanup rather than where the bug is.
+    """
+    conn = _open(db_path)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _available() -> list[tuple[str, Path]]:
@@ -91,6 +120,9 @@ def apply_migrations(conn: sqlite3.Connection) -> list[str]:
 
 
 def migrate(db_path: Path | str) -> list[str]:
-    """Open ``db_path`` and bring it up to date. Returns the versions applied."""
-    with connect(db_path) as conn:
+    """Open ``db_path``, bring it up to date, then close it.
+
+    Returns the versions applied.
+    """
+    with connection(db_path) as conn:
         return apply_migrations(conn)
