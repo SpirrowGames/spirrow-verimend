@@ -1,6 +1,6 @@
 [project]
 name = "verimend"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Detect drift between Spirrow product reality and its documentation, and propose fixes as pull requests."
 requires-python = ">=3.11"
 dependencies = [
@@ -23,6 +23,12 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# The version is declared exactly once, in src/verimend/__init__.py.
+# Hatchling reads that assignment at build time, so the packaging metadata
+# and the value /health reports are the same fact and cannot drift.
+[tool.hatch.version]
+path = "src/verimend/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/verimend"]
