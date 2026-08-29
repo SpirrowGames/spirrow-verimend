@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Single source of truth for the spirrow-verimend gate.
+# Run identically by CI (.github/workflows/ci.yml) and the autonomous loop's
+# implementer (it executes `bash .mindwire-gate`), so the two can never drift.
+# Exit 0 = green.
+#
+# `uv sync` is deliberately plain: this project declares its test dependency in
+# `[dependency-groups] dev`, which uv installs by default. Do NOT copy
+# `uv sync --extra dev` from spirrow-mindwire - verimend has no such extra and
+# the flag would fail the gate.
+set -euo pipefail
+
+uv sync
+uv run pytest
