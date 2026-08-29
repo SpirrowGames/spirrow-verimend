@@ -1,0 +1,36 @@
+# Verimend crawl targets (docs/design.md section 1 and section 5.1).
+#
+# Each target declares the repository, the documentation globs to reconcile,
+# and which deterministic fact extractors are enabled for it. Extractors that
+# are not listed are disabled; every target must enable at least one.
+#
+# Adding a repository here also requires registering it in the implementer
+# PAT's Selected Repositories (docs/design.md section 1).
+
+version: 1
+
+targets:
+  - repo: SpirrowGames/spirrow-magickit
+    doc_globs:
+      - README.md
+      - README.ja.md
+      - CLAUDE.md
+      - docs/**/*.md
+    extractors:
+      mcp_schema: true
+      config_keys: true
+      entrypoints: true
+      ports: true
+      service_health: true
+
+  - repo: SpirrowGames/spirrow-voxelworld
+    doc_globs:
+      - README.md
+      - CLAUDE.md
+      - docs/**/*.md
+    extractors:
+      mcp_schema: false
+      config_keys: true
+      entrypoints: true
+      ports: true
+      service_health: false
