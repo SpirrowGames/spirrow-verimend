@@ -25,4 +25,6 @@ verify + mend。検証と修正を毎晩回すことで、ドキュメントが�
 
 ## ステータス
 
-設計フェーズ。詳細は [docs/design.md](docs/design.md)。
+実装フェーズ（M1）。骨格まで実装済み: FastAPI（:8118 の `/health`）、`crawl_run` / `fact` の
+SQLite マイグレーション、クロール対象の宣言 [config/targets.yaml](config/targets.yaml)。
+collector / extractor / reconciler / mender は未実装。詳細は [docs/design.md](docs/design.md)。
