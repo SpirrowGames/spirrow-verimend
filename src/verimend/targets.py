@@ -12,13 +12,30 @@ work during a nightly run.
 from __future__ import annotations
 
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 REPO_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$"
+
+# A doc glob is matched against a shallow clone of the target repository, so it
+# has to be repository-relative. Both flavours are consulted rather than the
+# host-native ``pathlib.Path``, because each flavour is blind to the other's
+# syntax and a host-native check is therefore only as strict as the machine it
+# happens to run on:
+#
+#   - ``Path`` is ``PosixPath`` on the Linux crawler and CI runner. There,
+#     ``Path("C:/docs").anchor`` is "" and ``Path("C:/docs").is_absolute()`` is
+#     False, so a drive-lettered path would be accepted exactly where the
+#     crawler actually runs.
+#   - ``Path`` is ``WindowsPath`` on a developer's Windows box. There,
+#     backslashes separate components, so a POSIX-only check misses
+#     ``docs\..\..\etc`` -- which ``PosixPath`` reads as one filename.
+#
+# Consulting both flavours makes the verdict identical on every host.
+_PATH_FLAVOURS = (PurePosixPath, PureWindowsPath)
 
 
 class ExtractorName(str, Enum):
@@ -33,6 +50,35 @@ class ExtractorName(str, Enum):
 
 class TargetsConfigError(ValueError):
     """Raised when ``targets.yaml`` is missing, unreadable, or invalid."""
+
+
+def _glob_must_stay_in_repository(glob: str) -> None:
+    """Raise unless ``glob`` can only ever match inside the repository clone.
+
+    The test is pathlib's parse of the string under both flavours, not string
+    prefix matching. A leading slash or backslash is only one of several ways to
+    anchor a path, and the ways it misses -- drive letters and UNC shares -- are
+    exactly the ones a prefix check lets through silently. See ``_PATH_FLAVOURS``
+    for why both flavours are consulted instead of the host-native ``Path``.
+
+    ``anchor`` is the predicate rather than ``is_absolute()`` because a
+    drive-relative path such as ``"C:docs"`` is *not* absolute -- it is relative
+    to whatever the current directory on drive C: happens to be -- yet it is
+    still resolved outside the clone. ``anchor`` is non-empty for all three of
+    a root, a drive, and a UNC share.
+
+    One deliberate false positive follows: a repository-root file whose name
+    contains a colon (``"a:b.md"``) parses as drive-relative under the Windows
+    flavour and is refused. Such a name cannot be checked out on Windows at all,
+    and this module fails loudly on ambiguity by design, so the trade is taken
+    knowingly rather than papered over.
+    """
+    for flavour in _PATH_FLAVOURS:
+        path = flavour(glob)
+        if path.anchor:
+            raise ValueError(f"doc glob must be repository-relative, not anchored: {glob!r}")
+        if ".." in path.parts:
+            raise ValueError(f"doc glob must stay inside the repository: {glob!r}")
 
 
 class Target(BaseModel):
@@ -53,8 +99,7 @@ class Target(BaseModel):
         for glob in globs:
             if not glob or glob.strip() != glob:
                 raise ValueError(f"doc glob must be a non-empty trimmed string: {glob!r}")
-            if glob.startswith("/") or glob.startswith("\\") or ".." in Path(glob).parts:
-                raise ValueError(f"doc glob must stay inside the repository: {glob!r}")
+            _glob_must_stay_in_repository(glob)
         return globs
 
     @model_validator(mode="after")

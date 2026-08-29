@@ -98,6 +98,40 @@ def test_invalid_documents_are_rejected(raw: dict, reason: str) -> None:
     assert reason in str(excinfo.value)
 
 
+@pytest.mark.parametrize(
+    "glob",
+    [
+        pytest.param(r"C:/docs/**/*.md", id="drive-letter-forward-slashes"),
+        pytest.param(r"C:\docs", id="drive-letter-backslashes"),
+        pytest.param(r"C:docs", id="drive-relative"),
+        pytest.param(r"//server/share/x.md", id="unc-forward-slashes"),
+        pytest.param(r"\\server\share\x.md", id="unc-backslashes"),
+        pytest.param(r"docs\..\..\etc\passwd", id="backslash-traversal"),
+    ],
+)
+def test_globs_anchored_outside_the_repository_are_rejected(glob: str) -> None:
+    """A doc glob must be repository-relative on every host, not just this one.
+
+    These cases are the ones a leading-slash string check misses. Each is
+    rejected identically under both path flavours, so the verdict does not
+    depend on whether the validator happens to run on the Linux crawler or on a
+    developer's Windows box -- a validator that disagreed with itself across
+    hosts would be no invariant at all.
+    """
+    with pytest.raises(TargetsConfigError):
+        parse_targets(_with_target(doc_globs=[glob]))
+
+
+@pytest.mark.parametrize(
+    "glob",
+    ["README.md", "docs/**/*.md", "docs/adr/*.md", "a/b/c.md", "docs/v1.2/*.md"],
+)
+def test_ordinary_relative_globs_are_accepted(glob: str) -> None:
+    """The tightened check must not start refusing legitimate globs."""
+    config = parse_targets(_with_target(doc_globs=[glob]))
+    assert config.targets[0].doc_globs == [glob]
+
+
 def test_non_mapping_document_is_rejected() -> None:
     with pytest.raises(TargetsConfigError):
         parse_targets(["SpirrowGames/spirrow-magickit"])
