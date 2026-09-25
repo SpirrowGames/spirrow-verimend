@@ -74,6 +74,11 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
   - `entrypoints`: pyproject / systemd unit 想定の起動コマンド
   - `ports`: リテラルポート番号の出現箇所
   - `service_health`: Magickit 経由で取得した稼働状態
+- 実装メモ（T03）:
+  - 読むのは git 管理下のファイルのみ。`tests/` `test/` `testing/` `fixtures/` 配下は除外（テストの偽ツール・偽ポートは実態ではない）。Markdown は ports の走査対象外
+  - `fact.source_kind` への対応: `mcp_schema`→`tool_schema`、`config_keys` / `entrypoints`→`config`、`ports`→`file`。抽出器名は content JSON の `extractor` に入る
+  - `content` は「何が真か」だけを持ち（正規化 JSON、`content_hash` = その SHA-256）、位置は `source_ref`（`owner/name@<commit>:<path>:<line>`）にのみ持つ。行がずれても同じファクトは同じハッシュ
+  - 障害の封じ込め単位: 抽出器が例外 → その抽出器のファクトは1件も保存しない / clone 失敗 → そのリポジトリのみ欠落。どちらも run は `partial`
 
 ### 5.2 extractor（LLM）
 - 入力は見出し単位のチャンク（数百〜2000トークン程度）。長コンテキストに依存しない
