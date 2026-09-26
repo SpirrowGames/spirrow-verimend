@@ -25,7 +25,8 @@ Verimend crawls the Spirrow products, detects drift between reality (code, confi
 
 ## Status
 
-Implementation, milestone M1. The service scaffold is in place: FastAPI on :8118 with `/health`,
-SQLite migrations for `crawl_run` / `fact`, and crawl targets declared in
-[config/targets.yaml](config/targets.yaml). The collector, extractor, reconciler, and mender are not
-built yet. See [docs/design.md](docs/design.md) (Japanese).
+Implementation, milestone M1. In place: FastAPI on :8118 with `/health`, SQLite migrations for
+`crawl_run` / `fact`, crawl targets declared in [config/targets.yaml](config/targets.yaml), and the
+collector with four deterministic fact extractors (`mcp_schema`, `config_keys`, `entrypoints`,
+`ports`) -- run it with `uv run verimend collect [--repo OWNER/NAME]`. The `service_health` source,
+the extractor, reconciler, and mender are not built yet. See [docs/design.md](docs/design.md) (Japanese).

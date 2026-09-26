@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     port: int = 8118
     db_path: Path = Path("var/verimend.sqlite3")
     targets_path: Path = Path("config/targets.yaml")
+    # Where the collector clones targets from, and how long one clone may take.
+    github_base_url: str = "https://github.com"
+    clone_timeout_s: float = 300.0
 
 
 def get_settings() -> Settings:
