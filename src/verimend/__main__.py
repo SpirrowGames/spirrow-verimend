@@ -8,6 +8,7 @@ import logging
 from collections.abc import Sequence
 
 from verimend.collector import collect
+from verimend.collector.health import magickit_health_source
 from verimend.collector.run import STATUS_FAILED, STATUS_PARTIAL, github_checkout
 from verimend.db import connection
 from verimend.db import migrate as run_migrations
@@ -59,7 +60,9 @@ def _collect(settings, repos: list[str] | None) -> int:
     run_migrations(settings.db_path)
     checkout = github_checkout(settings.github_base_url, settings.clone_timeout_s)
     with connection(settings.db_path) as conn:
-        result = collect(conn, targets, checkout)
+        result = collect(
+            conn, targets, checkout, magickit_health_source(settings.magickit_url, settings.magickit_timeout_s)
+        )
     print(f"crawl_run {result.run_id}: {result.status}")
     print(json.dumps(result.stats, indent=2, ensure_ascii=False))
     return {STATUS_PARTIAL: 1, STATUS_FAILED: 1}.get(result.status, 0)

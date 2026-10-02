@@ -131,6 +131,21 @@ class TargetsConfig(BaseModel):
             seen.add(target.repo)
         return self
 
+    @model_validator(mode="after")
+    def _service_health_at_most_once(self) -> "TargetsConfig":
+        """``service_health`` may be enabled on at most one target.
+
+        Its facts belong to no repository (``source_ref`` is
+        ``magickit:service_health/<service>``) and ``fact`` has no target
+        column, so a second target enabling it would store the same facts
+        twice in one run. Refusing the config makes that impossible instead of
+        deduplicating after the fact.
+        """
+        enabled = [t.repo for t in self.targets if ExtractorName.SERVICE_HEALTH in t.enabled_extractors]
+        if len(enabled) > 1:
+            raise ValueError(f"service_health may be enabled on at most one target, got {enabled}")
+        return self
+
     def get(self, repo: str) -> Target | None:
         """Return the target for ``repo``, or None when it is not declared."""
         return next((t for t in self.targets if t.repo == repo), None)

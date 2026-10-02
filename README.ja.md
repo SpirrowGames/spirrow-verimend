@@ -27,6 +27,6 @@ verify + mend。検証と修正を毎晩回すことで、ドキュメントが�
 
 実装フェーズ（M1）。実装済み: FastAPI（:8118 の `/health`）、`crawl_run` / `fact` の
 SQLite マイグレーション、クロール対象の宣言 [config/targets.yaml](config/targets.yaml)、
-collector と決定的ファクト抽出器4種（`mcp_schema` / `config_keys` / `entrypoints` / `ports`。
-`uv run verimend collect [--repo OWNER/NAME]` で実行）。`service_health` ソース、extractor /
-reconciler / mender は未実装。詳細は [docs/design.md](docs/design.md)。
+collector とファクト抽出器5種（`mcp_schema` / `config_keys` / `entrypoints` / `ports` /
+`service_health`。`service_health` は `VERIMEND_MAGICKIT_URL` の Magickit MCP から取得。
+`uv run verimend collect [--repo OWNER/NAME]` で実行）。extractor / reconciler / mender は未実装。詳細は [docs/design.md](docs/design.md)。
