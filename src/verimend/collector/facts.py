@@ -41,5 +41,29 @@ class Fact:
         return f"{ref}:{self.line}" if self.line is not None else ref
 
 
+@dataclass(frozen=True)
+class LiveFact:
+    """A fact observed from a running system rather than read from a commit.
+
+    Its location is fixed (``ref``) and names neither a repository nor a
+    commit, because the state it records belongs to neither -- see
+    ``verimend.collector.health``. It is stored through the same path as a
+    ``Fact``, so ``source_ref`` takes the same arguments and ignores them.
+    """
+
+    source_kind: SourceKind
+    ref: str
+    content: dict[str, Any]
+
+    def canonical_content(self) -> str:
+        return canonical_json(self.content)
+
+    def content_hash(self) -> str:
+        return hashlib.sha256(self.canonical_content().encode("utf-8")).hexdigest()
+
+    def source_ref(self, repo: str, commit: str) -> str:
+        return self.ref
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))

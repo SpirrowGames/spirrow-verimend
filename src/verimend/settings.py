@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # Where the collector clones targets from, and how long one clone may take.
     github_base_url: str = "https://github.com"
     clone_timeout_s: float = 300.0
+    # Magickit's MCP endpoint (Streamable HTTP, e.g. http://host:8114/mcp), the
+    # source of the service_health facts. No default: an unset URL makes that
+    # extractor fail loudly (run ``partial``) rather than probe a guessed host.
+    magickit_url: str | None = None
+    magickit_timeout_s: float = 60.0
 
 
 def get_settings() -> Settings:

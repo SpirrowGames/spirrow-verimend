@@ -79,6 +79,13 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
   - `fact.source_kind` への対応: `mcp_schema`→`tool_schema`、`config_keys` / `entrypoints`→`config`、`ports`→`file`。抽出器名は content JSON の `extractor` に入る
   - `content` は「何が真か」だけを持ち（正規化 JSON、`content_hash` = その SHA-256）、位置は `source_ref`（`owner/name@<commit>:<path>:<line>`）にのみ持つ。行がずれても同じファクトは同じハッシュ
   - 障害の封じ込め単位: 抽出器が例外 → その抽出器のファクトは1件も保存しない / clone 失敗 → そのリポジトリのみ欠落。どちらも run は `partial`
+- 実装メモ（T04 `service_health`）:
+  - 取得元は Magickit の MCP ツール `service_health`（Streamable HTTP、接続先は `VERIMEND_MAGICKIT_URL`、timeout は `VERIMEND_MAGICKIT_TIMEOUT_S`）。REST `GET /health` は使わない（3 サービスしか返さず version がハードコードのため）
+  - 1 サービス 1 ファクト、`source_kind`=`service_health`。`content` は `extractor` / `service` / `status` / `url` / `available_tools`（sorted、無ければキーごと省く）のみ。`timestamp` / `response_time_ms` / `error` の文言 / 全体 `status` は毎回変わるので入れない（観測時刻は `crawl_run.started_at`）
+  - `source_ref` は `magickit:service_health/<service>`。commit も target repo も含まない（稼働状態はどちらの性質でもない）
+  - 実行は他の抽出器と同じ target ループの中（結果は `stats.targets[<repo>].extractors.service_health`）。clone に失敗した target では試行されない
+  - `service_health` を有効にできる target は最大 1 つ（`targets.yaml` のロード時検証）。`fact` に target 列が無いため、2 つ目は同じファクトの重複挿入になる
+  - 届かない / timeout / 応答不正 / `services` が空 → その target の error、ファクト 0 件、run は `partial`。URL 未設定も同じ扱い
 
 ### 5.2 extractor（LLM）
 - 入力は見出し単位のチャンク（数百〜2000トークン程度）。長コンテキストに依存しない
