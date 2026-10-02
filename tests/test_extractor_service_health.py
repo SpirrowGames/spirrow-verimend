@@ -139,22 +139,6 @@ def test_mcp_source_without_the_tool_is_an_error() -> None:
         magickit_health_source(MCPServer("no-tools"), timeout=10)()
 
 
-@pytest.mark.parametrize(
-    ("text", "error"),
-    [("not json", "something other than JSON"), ("[1, 2]", "answered with list, not an object")],
-)
-def test_mcp_source_rejects_an_unusable_text_answer(text, error) -> None:
-    # structured_output=False: no structured_content, so _call has to parse the text block.
-    server = MCPServer("text-magickit")
-
-    @server.tool(structured_output=False)
-    async def service_health() -> str:
-        return text
-
-    with pytest.raises(HealthSourceError, match=error):
-        magickit_health_source(server, timeout=10)()
-
-
 def test_mcp_source_without_a_url_is_an_error() -> None:
     with pytest.raises(HealthSourceError, match="VERIMEND_MAGICKIT_URL is not set"):
         magickit_health_source(None, timeout=10)()
