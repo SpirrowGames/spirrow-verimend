@@ -24,8 +24,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from verimend.collector.extractors import REGISTRY
+from verimend.collector import extractors
 from verimend.collector.facts import canonical_json
+from verimend.collector.health import HealthSource, HealthSourceError
 from verimend.collector.tree import RepoTree
 from verimend.targets import Target
 
@@ -77,8 +78,21 @@ def github_checkout(base_url: str = "https://github.com", timeout: float = 300.0
     return checkout
 
 
-def collect(conn: sqlite3.Connection, targets: Sequence[Target], checkout: Checkout) -> CollectResult:
-    """Record a ``crawl_run`` and the facts of every target. Returns its outcome."""
+def collect(
+    conn: sqlite3.Connection,
+    targets: Sequence[Target],
+    checkout: Checkout,
+    health_source: HealthSource | None = None,
+) -> CollectResult:
+    """Record a ``crawl_run`` and the facts of every target. Returns its outcome.
+
+    ``health_source`` feeds the ``service_health`` extractor. It runs inside
+    the target loop like every other extractor, so its failure is contained
+    and recorded the same way. Without one, a target that enables
+    ``service_health`` gets an error for it (the run is ``partial``) rather
+    than a silent skip.
+    """
+    registry = extractors.extractors_for(health_source or _no_health_source)
     run_id = conn.execute(
         "INSERT INTO crawl_run (started_at, status) VALUES (?, ?)",
         (_now(), STATUS_RUNNING),
@@ -88,7 +102,7 @@ def collect(conn: sqlite3.Connection, targets: Sequence[Target], checkout: Check
     stats: dict[str, Any] = {"targets": {}}
     try:
         for target in targets:
-            stats["targets"][target.repo] = _collect_target(conn, run_id, target, checkout)
+            stats["targets"][target.repo] = _collect_target(conn, run_id, target, checkout, registry)
             conn.commit()
     except BaseException:
         conn.rollback()
@@ -100,7 +114,13 @@ def collect(conn: sqlite3.Connection, targets: Sequence[Target], checkout: Check
     return CollectResult(run_id=run_id, status=status, stats=stats)
 
 
-def _collect_target(conn: sqlite3.Connection, run_id: int, target: Target, checkout: Checkout) -> dict[str, Any]:
+def _collect_target(
+    conn: sqlite3.Connection,
+    run_id: int,
+    target: Target,
+    checkout: Checkout,
+    registry: dict[Any, extractors.Extractor],
+) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="verimend-") as tmp:
         dest = Path(tmp) / "repo"
         try:
@@ -112,10 +132,7 @@ def _collect_target(conn: sqlite3.Connection, run_id: int, target: Target, check
 
         result: dict[str, Any] = {"commit": commit, "extractors": {}}
         for name in target.enabled_extractors:
-            extractor = REGISTRY.get(name)
-            if extractor is None:
-                result["extractors"][name.value] = {"skipped": "not implemented yet"}
-                continue
+            extractor = registry[name]  # complete by construction; see extractors.extractors_for
             try:
                 facts = list(extractor(tree))
             except Exception as exc:  # noqa: BLE001 - contained per extractor, see module docstring
@@ -140,6 +157,10 @@ def _finish(conn: sqlite3.Connection, run_id: int, status: str, stats: dict[str,
         (_now(), status, canonical_json(stats), run_id),
     )
     conn.commit()
+
+
+def _no_health_source() -> dict[str, Any]:
+    raise HealthSourceError("no health source configured (VERIMEND_MAGICKIT_URL)")
 
 
 def _has_errors(stats: dict[str, Any]) -> bool:

@@ -147,3 +147,20 @@ def test_broken_yaml_is_rejected(tmp_path: Path) -> None:
 def test_missing_file_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(TargetsConfigError):
         load_targets(tmp_path / "absent.yaml")
+
+
+def _health_target(repo: str, enabled: bool = True) -> dict:
+    return {"repo": repo, "doc_globs": ["README.md"], "extractors": {"ports": True, "service_health": enabled}}
+
+
+def test_service_health_on_two_targets_is_rejected() -> None:
+    """Its facts name no repository, so two targets would store them twice per run."""
+    raw = {"version": 1, "targets": [_health_target("o/a"), _health_target("o/b")]}
+    with pytest.raises(TargetsConfigError) as excinfo:
+        parse_targets(raw)
+    assert "service_health may be enabled on at most one target" in str(excinfo.value)
+
+
+def test_service_health_on_one_target_is_accepted() -> None:
+    raw = {"version": 1, "targets": [_health_target("o/a"), _health_target("o/b", enabled=False)]}
+    assert [t.repo for t in parse_targets(raw).targets] == ["o/a", "o/b"]

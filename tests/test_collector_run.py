@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from verimend.collector import collect
+from verimend.collector import extractors as extractors_module
 from verimend.collector import run as run_module
 from verimend.db import connection, migrate
 from verimend.targets import ExtractorName, parse_targets
@@ -78,26 +79,27 @@ def test_stores_facts_from_every_enabled_extractor(source, db) -> None:
     assert json.loads(run["stats_json"]) == result.stats
 
 
-def test_unbuilt_extractor_is_skipped_not_failed(source, db) -> None:
+def test_service_health_without_a_source_is_an_error_not_a_skip(source, db) -> None:
+    """There is no "not implemented yet" path left: a missing source fails loudly."""
     root, commit = source
     targets = _targets("o/demo", extractors={"ports": True, "service_health": True})
     with connection(db) as conn:
         result = collect(conn, targets, _copying_checkout(root, commit))
 
-    assert result.status == "succeeded"
-    assert result.stats["targets"]["o/demo"]["extractors"]["service_health"] == {"skipped": "not implemented yet"}
+    assert result.status == "partial"
+    assert "error" in result.stats["targets"]["o/demo"]["extractors"]["service_health"]
 
 
 def test_failing_extractor_loses_only_its_own_facts(source, db, monkeypatch) -> None:
     root, commit = source
 
     def half_then_boom(tree):
-        yield from run_module.REGISTRY[ExtractorName.PORTS](tree)
+        yield from extractors_module.REGISTRY[ExtractorName.PORTS](tree)
         raise RuntimeError("boom")
 
-    registry = dict(run_module.REGISTRY)
+    registry = dict(extractors_module.REGISTRY)
     registry[ExtractorName.MCP_SCHEMA] = half_then_boom
-    monkeypatch.setattr(run_module, "REGISTRY", registry)
+    monkeypatch.setattr(extractors_module, "REGISTRY", registry)
 
     with connection(db) as conn:
         result = collect(conn, _targets("o/demo"), _copying_checkout(root, commit))
