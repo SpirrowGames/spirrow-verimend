@@ -3,6 +3,7 @@
 import asyncio
 import json
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -151,8 +152,13 @@ def test_mcp_source_times_out() -> None:
         await asyncio.sleep(30)
         return ANSWER
 
-    with pytest.raises(HealthSourceError, match="within"):
+    # Either bound may fire first -- the client's read timeout or the outer
+    # wait_for -- and they word it differently. What matters is that the call
+    # ends as a HealthSourceError instead of hanging an unattended run.
+    started = time.monotonic()
+    with pytest.raises(HealthSourceError):
         magickit_health_source(server, timeout=0.5)()
+    assert time.monotonic() - started < 10
 
 
 # --- inside collect() --------------------------------------------------------
