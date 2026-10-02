@@ -126,8 +126,70 @@ def test_migration_scripts_are_rerunnable(tmp_path: Path) -> None:
             sql = script.read_text(encoding="utf-8")
             conn.executescript(sql)
             before = _tables(conn)
-            conn.executescript(sql)  # replay: must not raise
+            changed = _replay_changes_row_counts(conn, sql)  # replay: must not raise
             assert _tables(conn) == before
+            assert changed == {}, f"{script.name}: a replay changed row counts (table: (before, after)): {changed}"
+
+
+def _user_table_row_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Row count of every user table, enumerated from ``sqlite_master``.
+
+    Table names are deliberately not hard-coded: the next table a migration
+    adds is covered without anyone having to remember to list it here.
+
+    ``NOT LIKE 'sqlite_%'`` leaves out SQLite's internal tables. The one that
+    matters is ``sqlite_sequence``, a by-product of AUTOINCREMENT: a replay
+    that inserts into a user table is already caught on that table itself.
+
+    ``schema_migration`` needs no special case. It is created by
+    ``BOOKKEEPING_DDL`` in ``migrate.py``, not by any script, so on this raw
+    ``executescript`` path it does not exist and is not enumerated. Should a
+    script ever create it, it is enumerated -- and covered -- automatically.
+    """
+    names = [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+    return {name: conn.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0] for name in names}
+
+
+def _replay_changes_row_counts(conn: sqlite3.Connection, sql: str) -> dict[str, tuple[int | None, int | None]]:
+    """Replay ``sql`` and return the tables whose row count differs, as (before, after).
+
+    An empty result means the replay left every user table's row count alone.
+    Today's ``0001`` has no DML, so every count is 0 both times and this is
+    trivially empty; the check exists to arm itself the moment a script
+    gains DML that is not guarded against a replay.
+    """
+    before = _user_table_row_counts(conn)
+    conn.executescript(sql)
+    after = _user_table_row_counts(conn)
+    return {
+        name: (before.get(name), after.get(name))
+        for name in sorted(before.keys() | after.keys())
+        if before.get(name) != after.get(name)
+    }
+
+
+def test_row_count_trap_fires_on_an_unguarded_insert(tmp_path: Path) -> None:
+    """The trap above must actually trip, or it is indistinguishable from an always-green test.
+
+    The table is synthetic, created by this test, so naming it here does not
+    contradict the no-hard-coding rule for the real migrations.
+    """
+    sql = "CREATE TABLE IF NOT EXISTS t (x); INSERT INTO t VALUES (1);"
+    with connection(tmp_path / "trap.sqlite3") as conn:
+        conn.executescript(sql)
+        assert _replay_changes_row_counts(conn, sql) == {"t": (1, 2)}
+
+
+def test_row_count_trap_stays_quiet_on_a_guarded_insert(tmp_path: Path) -> None:
+    sql = "CREATE TABLE IF NOT EXISTS t (x PRIMARY KEY); INSERT OR IGNORE INTO t VALUES (1);"
+    with connection(tmp_path / "trap.sqlite3") as conn:
+        conn.executescript(sql)
+        assert _replay_changes_row_counts(conn, sql) == {}
 
 
 def test_downstream_tables_are_not_created_yet(tmp_path: Path) -> None:
