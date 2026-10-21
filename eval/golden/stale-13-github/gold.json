@@ -1,77 +1,9 @@
 {
   "claims": [
-    {
-      "id": "c1",
-      "anchor": [
-        3,
-        3
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "github",
-        "param": "operation"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c2",
-      "anchor": [
-        4,
-        4
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "github",
-        "param": "arguments"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c3",
-      "anchor": [
-        5,
-        5
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "github",
-        "param": "repo"
-      },
-      "final": "stale",
-      "deterministic": "stale",
-      "evidence_keys": [
-        "tool:github"
-      ],
-      "note": "repo goes inside arguments"
-    },
-    {
-      "id": "c4",
-      "anchor": [
-        6,
-        6
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "github_operations",
-        "param": "filter"
-      },
-      "final": "stale",
-      "deterministic": "stale",
-      "evidence_keys": [
-        "tool:github_operations"
-      ],
-      "note": "renamed name_filter"
-    }
+    {"id": "c1", "anchor": [3, 3], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "github", "param": "operation"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "github", "param": "arguments"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "github", "param": "repo"}, "final": "stale", "deterministic": "stale", "evidence_keys": ["tool:github"], "note": "repo goes inside arguments"},
+    {"id": "c4", "anchor": [6, 6], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "github_operations", "param": "filter"}, "final": "stale", "deterministic": "stale", "evidence_keys": ["tool:github_operations"], "note": "renamed name_filter"}
   ],
   "non_claims": [],
   "injected_invalid": []

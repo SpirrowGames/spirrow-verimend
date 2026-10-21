@@ -1,35 +1,5 @@
 [
-  {
-    "key": "port:8113@config/magickit_config.yaml",
-    "source_kind": "file",
-    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:9",
-    "content": {
-      "extractor": "ports",
-      "port": 8113,
-      "via": "key_value",
-      "context": "port: 8113"
-    }
-  },
-  {
-    "key": "entry:python -m magickit.main",
-    "source_kind": "config",
-    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/main.py:630",
-    "content": {
-      "extractor": "entrypoints",
-      "kind": "python_module",
-      "module": "magickit.main",
-      "command": "python -m magickit.main"
-    }
-  },
-  {
-    "key": "port:8115@src/magickit/deploy/registry.py",
-    "source_kind": "file",
-    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/deploy/registry.py:134",
-    "content": {
-      "extractor": "ports",
-      "port": 8115,
-      "via": "url",
-      "context": "health_url=\"http://127.0.0.1:8115/health\","
-    }
-  }
+  {"key": "port:8113@config/magickit_config.yaml", "source_kind": "file", "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:9", "content": {"extractor": "ports", "port": 8113, "via": "key_value", "context": "port: 8113"}},
+  {"key": "entry:python -m magickit.main", "source_kind": "config", "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/main.py:630", "content": {"extractor": "entrypoints", "kind": "python_module", "module": "magickit.main", "command": "python -m magickit.main"}},
+  {"key": "port:8115@src/magickit/deploy/registry.py", "source_kind": "file", "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/deploy/registry.py:134", "content": {"extractor": "ports", "port": 8115, "via": "url", "context": "health_url=\"http://127.0.0.1:8115/health\","}}
 ]

@@ -1,48 +1,8 @@
 {
   "claims": [
-    {
-      "id": "c1",
-      "anchor": [
-        3,
-        3
-      ],
-      "claim_type": "path",
-      "subject": null,
-      "final": "stale",
-      "deterministic": "deferred",
-      "evidence_keys": [
-        "port:8113@config/magickit_config.yaml"
-      ],
-      "note": "config/magickit_config.yaml"
-    },
-    {
-      "id": "c2",
-      "anchor": [
-        4,
-        4
-      ],
-      "claim_type": "path",
-      "subject": null,
-      "final": "stale",
-      "deterministic": "deferred",
-      "evidence_keys": [
-        "entry:python -m magickit.main"
-      ],
-      "note": "src/magickit/main.py"
-    },
-    {
-      "id": "c3",
-      "anchor": [
-        5,
-        5
-      ],
-      "claim_type": "path",
-      "subject": null,
-      "final": "verified",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": ""
-    }
+    {"id": "c1", "anchor": [3, 3], "claim_type": "path", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["port:8113@config/magickit_config.yaml"], "note": "config/magickit_config.yaml"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "path", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["entry:python -m magickit.main"], "note": "src/magickit/main.py"},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "path", "subject": null, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": ""}
   ],
   "non_claims": [],
   "injected_invalid": []

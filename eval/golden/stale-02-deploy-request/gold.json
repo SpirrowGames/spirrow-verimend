@@ -1,94 +1,10 @@
 {
   "claims": [
-    {
-      "id": "c1",
-      "anchor": [
-        5,
-        5
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "deploy_request",
-        "param": "target"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c2",
-      "anchor": [
-        6,
-        6
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "deploy_request",
-        "param": "requested_by"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c3",
-      "anchor": [
-        7,
-        7
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "deploy_request",
-        "param": "priority"
-      },
-      "final": "stale",
-      "deterministic": "stale",
-      "evidence_keys": [
-        "tool:deploy_request"
-      ],
-      "note": "no such parameter"
-    },
-    {
-      "id": "c4",
-      "anchor": [
-        8,
-        8
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "deploy_request",
-        "param": "reason"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c5",
-      "anchor": [
-        9,
-        9
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "deploy_request",
-        "param": "dry_run"
-      },
-      "final": "stale",
-      "deterministic": "stale",
-      "evidence_keys": [
-        "tool:deploy_request"
-      ],
-      "note": "no such parameter"
-    }
+    {"id": "c1", "anchor": [5, 5], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_request", "param": "target"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c2", "anchor": [6, 6], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_request", "param": "requested_by"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c3", "anchor": [7, 7], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_request", "param": "priority"}, "final": "stale", "deterministic": "stale", "evidence_keys": ["tool:deploy_request"], "note": "no such parameter"},
+    {"id": "c4", "anchor": [8, 8], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_request", "param": "reason"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c5", "anchor": [9, 9], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_request", "param": "dry_run"}, "final": "stale", "deterministic": "stale", "evidence_keys": ["tool:deploy_request"], "note": "no such parameter"}
   ],
   "non_claims": [],
   "injected_invalid": []

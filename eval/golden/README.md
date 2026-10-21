@@ -32,6 +32,9 @@ eval/golden/<case-id>/
   gold.json   {claims, non_claims, injected_invalid}
 ```
 
+In the JSON files every fact, claim and other record sits on its own line, so a
+change to one label shows up in a diff as a change to one line.
+
 Each entry in `claims` has the following fields:
 
 | field | meaning |

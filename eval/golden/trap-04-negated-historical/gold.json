@@ -1,89 +1,10 @@
 {
   "claims": [
-    {
-      "id": "c1",
-      "anchor": [
-        3,
-        3
-      ],
-      "claim_type": "port",
-      "subject": {
-        "polarity": "historical",
-        "port": 8117,
-        "service": "magickit-mcp"
-      },
-      "final": "verified",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": "historical"
-    },
-    {
-      "id": "c2",
-      "anchor": [
-        4,
-        4
-      ],
-      "claim_type": "port",
-      "subject": {
-        "polarity": "current",
-        "port": 8114,
-        "service": "magickit-mcp"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c3",
-      "anchor": [
-        5,
-        5
-      ],
-      "claim_type": "port",
-      "subject": {
-        "polarity": "negated",
-        "port": 8000,
-        "service": "magickit"
-      },
-      "final": "verified",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": "negated; 8000 is gpu_metrics_url"
-    },
-    {
-      "id": "c4",
-      "anchor": [
-        6,
-        6
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "negated",
-        "tool": "chatroom_post_message",
-        "param": "thread_title"
-      },
-      "final": "verified",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": "negated; closed signature lacks it"
-    },
-    {
-      "id": "c5",
-      "anchor": [
-        7,
-        7
-      ],
-      "claim_type": "command",
-      "subject": {
-        "polarity": "negated",
-        "command": "magickit-server"
-      },
-      "final": "verified",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": "negated"
-    }
+    {"id": "c1", "anchor": [3, 3], "claim_type": "port", "subject": {"polarity": "historical", "port": 8117, "service": "magickit-mcp"}, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": "historical"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "port", "subject": {"polarity": "current", "port": 8114, "service": "magickit-mcp"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "port", "subject": {"polarity": "negated", "port": 8000, "service": "magickit"}, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": "negated; 8000 is gpu_metrics_url"},
+    {"id": "c4", "anchor": [6, 6], "claim_type": "parameter", "subject": {"polarity": "negated", "tool": "chatroom_post_message", "param": "thread_title"}, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": "negated; closed signature lacks it"},
+    {"id": "c5", "anchor": [7, 7], "claim_type": "command", "subject": {"polarity": "negated", "command": "magickit-server"}, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": "negated"}
   ],
   "non_claims": [],
   "injected_invalid": []

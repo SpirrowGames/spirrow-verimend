@@ -1,57 +1,8 @@
 {
   "claims": [
-    {
-      "id": "c1",
-      "anchor": [
-        3,
-        3
-      ],
-      "claim_type": "port",
-      "subject": {
-        "polarity": "historical",
-        "port": 8114,
-        "service": "magickit-mcp-local"
-      },
-      "final": "unverifiable",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": "history not in facts"
-    },
-    {
-      "id": "c2",
-      "anchor": [
-        4,
-        4
-      ],
-      "claim_type": "port",
-      "subject": {
-        "polarity": "current",
-        "port": 8118,
-        "service": "magickit-mcp-local"
-      },
-      "final": "stale",
-      "deterministic": "deferred",
-      "evidence_keys": [
-        "port:8117@spirrow-magickit-mcp-local.service"
-      ],
-      "note": "unit sets 8117"
-    },
-    {
-      "id": "c3",
-      "anchor": [
-        5,
-        5
-      ],
-      "claim_type": "command",
-      "subject": {
-        "polarity": "current",
-        "command": "python -m magickit.mcp_server"
-      },
-      "final": "verified",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": "declared command is the venv python path; tokens differ, so no deterministic match"
-    }
+    {"id": "c1", "anchor": [3, 3], "claim_type": "port", "subject": {"polarity": "historical", "port": 8114, "service": "magickit-mcp-local"}, "final": "unverifiable", "deterministic": "deferred", "evidence_keys": [], "note": "history not in facts"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "port", "subject": {"polarity": "current", "port": 8118, "service": "magickit-mcp-local"}, "final": "stale", "deterministic": "deferred", "evidence_keys": ["port:8117@spirrow-magickit-mcp-local.service"], "note": "unit sets 8117"},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "command", "subject": {"polarity": "current", "command": "python -m magickit.mcp_server"}, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": "declared command is the venv python path; tokens differ, so no deterministic match"}
   ],
   "non_claims": [],
   "injected_invalid": []

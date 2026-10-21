@@ -1,95 +1,13 @@
 {
   "claims": [
-    {
-      "id": "c1",
-      "anchor": [
-        3,
-        3
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "chatroom_get_thread",
-        "param": "thread_id"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c2",
-      "anchor": [
-        4,
-        4
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "chatroom_get_thread",
-        "param": "mode"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c3",
-      "anchor": [
-        5,
-        5
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "chatroom_list_threads",
-        "param": "status_filter"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c4",
-      "anchor": [
-        6,
-        6
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "chatroom_list_threads",
-        "param": "limit"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c5",
-      "anchor": [
-        7,
-        7
-      ],
-      "claim_type": "behavior",
-      "subject": null,
-      "final": "verified",
-      "deterministic": "deferred",
-      "evidence_keys": [],
-      "note": "summary says owner-only"
-    }
+    {"id": "c1", "anchor": [3, 3], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "chatroom_get_thread", "param": "thread_id"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "chatroom_get_thread", "param": "mode"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "chatroom_list_threads", "param": "status_filter"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c4", "anchor": [6, 6], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "chatroom_list_threads", "param": "limit"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c5", "anchor": [7, 7], "claim_type": "behavior", "subject": null, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": "summary says owner-only"}
   ],
   "non_claims": [
-    {
-      "anchor": [
-        9,
-        9
-      ],
-      "reason": "recommendation"
-    }
+    {"anchor": [9, 9], "reason": "recommendation"}
   ],
   "injected_invalid": []
 }

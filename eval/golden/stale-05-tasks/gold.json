@@ -1,96 +1,10 @@
 {
   "claims": [
-    {
-      "id": "c1",
-      "anchor": [
-        3,
-        3
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "add_task",
-        "param": "name"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c2",
-      "anchor": [
-        4,
-        4
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "add_task",
-        "param": "phase"
-      },
-      "final": "verified",
-      "deterministic": "verified",
-      "evidence_keys": [],
-      "note": ""
-    },
-    {
-      "id": "c3",
-      "anchor": [
-        5,
-        5
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "add_task",
-        "param": "due_date"
-      },
-      "final": "stale",
-      "deterministic": "stale",
-      "evidence_keys": [
-        "tool:add_task"
-      ],
-      "note": ""
-    },
-    {
-      "id": "c4",
-      "anchor": [
-        6,
-        6
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "update_task",
-        "param": "assignee"
-      },
-      "final": "stale",
-      "deterministic": "stale",
-      "evidence_keys": [
-        "tool:update_task"
-      ],
-      "note": ""
-    },
-    {
-      "id": "c5",
-      "anchor": [
-        7,
-        7
-      ],
-      "claim_type": "parameter",
-      "subject": {
-        "polarity": "current",
-        "tool": "list_tasks",
-        "param": "limit"
-      },
-      "final": "stale",
-      "deterministic": "stale",
-      "evidence_keys": [
-        "tool:list_tasks"
-      ],
-      "note": "list_tasks has no limit"
-    }
+    {"id": "c1", "anchor": [3, 3], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "add_task", "param": "name"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "add_task", "param": "phase"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "add_task", "param": "due_date"}, "final": "stale", "deterministic": "stale", "evidence_keys": ["tool:add_task"], "note": ""},
+    {"id": "c4", "anchor": [6, 6], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "update_task", "param": "assignee"}, "final": "stale", "deterministic": "stale", "evidence_keys": ["tool:update_task"], "note": ""},
+    {"id": "c5", "anchor": [7, 7], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "list_tasks", "param": "limit"}, "final": "stale", "deterministic": "stale", "evidence_keys": ["tool:list_tasks"], "note": "list_tasks has no limit"}
   ],
   "non_claims": [],
   "injected_invalid": []
