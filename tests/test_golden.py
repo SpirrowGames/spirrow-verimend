@@ -142,6 +142,22 @@ def test_load_case_rejects_facts_of_two_repositories(tmp_path: Path) -> None:
                                                                        claim_type="port")))
 
 
+@pytest.mark.parametrize(
+    ("facts", "message"),
+    [
+        ([], "facts.json is empty"),
+        ({"key": "a"}, "not an array"),
+        (
+            [{"key": "a", "source_kind": "file", "source_ref": "no-repo-prefix", "content": {"extractor": "ports"}}],
+            "one repository",
+        ),
+    ],
+)
+def test_load_case_rejects_unusable_facts(tmp_path: Path, facts: Any, message: str) -> None:
+    with pytest.raises(GoldenCaseError, match=message):
+        load_case(_write_case(tmp_path, facts=facts))
+
+
 # --------------------------------------------------------------- score
 
 
