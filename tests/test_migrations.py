@@ -1,14 +1,17 @@
 """Migrations must apply to an empty database and be idempotent."""
 
+import re
 import sqlite3
 from pathlib import Path
 
 import pytest
 
+from verimend.claims import CLAIM_TYPES
 from verimend.db import apply_migrations, connection, migrate, pending_migrations
 from verimend.db.migrate import MIGRATIONS_DIR
 
-EXPECTED_TABLES = {"crawl_run", "fact", "schema_migration"}
+EXPECTED_TABLES = {"crawl_run", "fact", "claim", "verdict", "schema_migration"}
+ALL_VERSIONS = ["0001_crawl_run_and_fact", "0002_claim_and_verdict"]
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -24,7 +27,7 @@ def test_applies_to_an_empty_database(tmp_path: Path) -> None:
     db = tmp_path / "nested" / "verimend.sqlite3"
     applied = migrate(db)
 
-    assert applied == ["0001_crawl_run_and_fact"]
+    assert applied == ALL_VERSIONS
     assert db.exists()
 
     with connection(db) as conn:
@@ -46,11 +49,31 @@ def test_applies_to_an_empty_database(tmp_path: Path) -> None:
             "content",
             "content_hash",
         ]
+        assert _columns(conn, "claim") == [
+            "id",
+            "run_id",
+            "doc_repo",
+            "doc_path",
+            "anchor_start",
+            "anchor_end",
+            "text",
+            "claim_type",
+            "extraction_model",
+            "subject_json",
+        ]
+        assert _columns(conn, "verdict") == [
+            "id",
+            "claim_id",
+            "result",
+            "method",
+            "evidence_json",
+            "patch_draft",
+        ]
 
 
 def test_is_idempotent(tmp_path: Path) -> None:
     db = tmp_path / "verimend.sqlite3"
-    assert migrate(db) == ["0001_crawl_run_and_fact"]
+    assert migrate(db) == ALL_VERSIONS
 
     with connection(db) as conn:
         assert pending_migrations(conn) == []
@@ -58,7 +81,7 @@ def test_is_idempotent(tmp_path: Path) -> None:
         assert apply_migrations(conn) == []
         recorded = [row["version"] for row in conn.execute("SELECT version FROM schema_migration")]
 
-    assert recorded == ["0001_crawl_run_and_fact"]
+    assert recorded == ALL_VERSIONS
 
 
 def test_idempotent_run_preserves_data(tmp_path: Path) -> None:
@@ -193,12 +216,87 @@ def test_row_count_trap_stays_quiet_on_a_guarded_insert(tmp_path: Path) -> None:
 
 
 def test_downstream_tables_are_not_created_yet(tmp_path: Path) -> None:
-    """claim / verdict / metric arrive with the code that writes them (M2 / M3)."""
+    """metric arrives with the code that writes it (M3)."""
     db = tmp_path / "verimend.sqlite3"
     migrate(db)
 
     with connection(db) as conn:
-        assert _tables(conn).isdisjoint({"claim", "verdict", "metric"})
+        assert "metric" not in _tables(conn)
+
+
+def _run_and_claim(conn: sqlite3.Connection, claim_type: str = "port") -> tuple[int, int]:
+    run_id = conn.execute(
+        "INSERT INTO crawl_run (started_at, status) VALUES ('2026-10-21T00:00:00Z', 'succeeded')"
+    ).lastrowid
+    claim_id = conn.execute(
+        "INSERT INTO claim (run_id, doc_repo, doc_path, text, claim_type) VALUES (?, 'o/r', 'README.md', 't', ?)",
+        (run_id, claim_type),
+    ).lastrowid
+    return run_id, claim_id
+
+
+def test_claim_rejects_unknown_claim_type(tmp_path: Path) -> None:
+    """The eight claim types of docs/design.md section 4 are the whole set."""
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        for claim_type in CLAIM_TYPES:
+            _run_and_claim(conn, claim_type)
+        with pytest.raises(sqlite3.IntegrityError):
+            _run_and_claim(conn, "opinion")
+
+
+def test_claim_type_check_and_python_literal_are_the_same_set(tmp_path: Path) -> None:
+    """The list lives twice: the CHECK on claim.claim_type and ``verimend.claims.ClaimType``.
+
+    The test above proves every Python value is accepted; this one reads the
+    CHECK back from the schema, so a value added to the SQL only (accepted by
+    the database, unknown to the code) fails here too.
+    """
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        (ddl,) = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'claim'").fetchone()
+    check = re.search(r"claim_type\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*claim_type\s+IN\s*\(([^)]*)\)", ddl)
+    assert check is not None, ddl
+    assert sorted(re.findall(r"'([^']*)'", check.group(1))) == sorted(CLAIM_TYPES)
+
+
+def test_verdict_result_and_method_are_checked(tmp_path: Path) -> None:
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        _, claim_id = _run_and_claim(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO verdict (claim_id, result, method, evidence_json) VALUES (?, 'maybe', 'llm', '{}')",
+                (claim_id,),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO verdict (claim_id, result, method, evidence_json) VALUES (?, 'stale', 'guess', '{}')",
+                (claim_id,),
+            )
+
+
+def test_a_claim_has_at_most_one_verdict(tmp_path: Path) -> None:
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        _, claim_id = _run_and_claim(conn)
+        insert = "INSERT INTO verdict (claim_id, result, method, evidence_json) VALUES (?, 'verified', 'llm', '{}')"
+        conn.execute(insert, (claim_id,))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(insert, (claim_id,))
+
+
+def test_deleting_a_run_deletes_its_claims_and_verdicts(tmp_path: Path) -> None:
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        run_id, claim_id = _run_and_claim(conn)
+        conn.execute(
+            "INSERT INTO verdict (claim_id, result, method, evidence_json) VALUES (?, 'verified', 'llm', '{}')",
+            (claim_id,),
+        )
+        conn.execute("DELETE FROM crawl_run WHERE id = ?", (run_id,))
+        assert conn.execute("SELECT count(*) FROM claim").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM verdict").fetchone()[0] == 0
 
 
 def test_connection_is_closed_when_the_block_exits(tmp_path: Path) -> None:
@@ -249,7 +347,7 @@ def test_migrate_closes_the_connection_it_opened(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(sqlite3, "connect", spy)
 
     db = tmp_path / "verimend.sqlite3"
-    assert migrate(db) == ["0001_crawl_run_and_fact"]
+    assert migrate(db) == ALL_VERSIONS
 
     assert opened, "migrate() opened no connection"
     for conn in opened:

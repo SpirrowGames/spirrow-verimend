@@ -103,3 +103,51 @@ def test_call_form_resolves_the_function(make_tree) -> None:
 def test_tools_in_tests_are_not_facts(make_tree) -> None:
     tree = make_tree({"tests/test_tools.py": TOOLS})
     assert list(mcp_schema.extract(tree)) == []
+
+
+OPEN = '''
+@mcp.tool()
+def closed(a: int, *, b: str = "x"):
+    pass
+
+
+@mcp.tool()
+def with_kwargs(a: int, **kwargs):
+    pass
+
+
+@mcp.tool()
+def with_args(*args):
+    pass
+
+
+@mcp.tool()
+def with_both(a, *rest, **options):
+    pass
+
+
+mcp.tool()(unresolved)
+'''
+
+
+def test_open_parameters_records_star_args_and_kwargs(make_tree) -> None:
+    """``*args`` / ``**kwargs`` are not listed as parameters, but their existence is a fact.
+
+    Without it, a closed signature and one accepting arbitrary names look the
+    same, and a reconciler would call a documented ``**kwargs`` option stale.
+    """
+    facts = _by_function(make_tree({"t.py": OPEN}))
+
+    assert facts["closed"].content["open_parameters"] is False
+    assert facts["with_kwargs"].content["open_parameters"] is True
+    assert facts["with_args"].content["open_parameters"] is True
+    assert facts["with_both"].content["open_parameters"] is True
+    # The star parameters themselves stay out of the named list.
+    assert [p["name"] for p in facts["with_both"].content["parameters"]] == ["a"]
+    assert facts["with_args"].content["parameters"] == []
+
+
+def test_open_parameters_is_unknown_when_the_function_is_unresolved(make_tree) -> None:
+    unresolved = _by_function(make_tree({"t.py": OPEN}))["unresolved"].content
+    assert unresolved["parameters"] is None
+    assert unresolved["open_parameters"] is None
