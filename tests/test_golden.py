@@ -13,6 +13,7 @@ from verimend.eval.golden import (
     GoldenCaseError,
     Score,
     load_case,
+    load_cases,
     run_oracle,
     score,
 )
@@ -224,6 +225,79 @@ def test_score_layer_changes_the_verdict_on_the_same_predictions(case: GoldenCas
 def test_score_combine_refuses_mixed_layers(case: GoldenCase) -> None:
     with pytest.raises(ValueError):
         Score.combine([score(case, [], "final"), score(case, [], "deterministic")])
+
+
+def test_score_combine_refuses_nothing() -> None:
+    with pytest.raises(ValueError):
+        Score.combine([])
+
+
+def test_score_combine_sums_every_count_and_list(tmp_path: Path) -> None:
+    gold = _gold_with()
+    gold["claims"].append(
+        {
+            "id": "c2",
+            "anchor": [4, 4],
+            "claim_type": "port",
+            "subject": {"polarity": "current", "port": 8080},
+            "final": "stale",
+            "deterministic": "deferred",
+            "evidence_keys": ["port:8113"],
+        }
+    )
+    gold["non_claims"] = [{"anchor": [1, 1], "reason": "heading"}]
+    case = load_case(_write_case(tmp_path, gold=gold))
+    perfect = score(case, [_pred([3, 3], "parameter", "verified"), _pred([4, 4], "port", "stale", ["port:8113"])], "final")
+    flawed = score(
+        case,
+        [
+            _pred([3, 3], "parameter", "stale", ["tool:run"]),  # wrong label: a parameter mismatch and a stale fp
+            _pred([1, 1], "path", "verified"),  # extra, on the non-claim
+        ],
+        "final",
+    )
+
+    combined = Score.combine([perfect, flawed])
+
+    assert combined.layer == "final"
+    assert (combined.total.gold, combined.total.matched, combined.total.agree) == (4, 3, 2)
+    assert (combined.total.stale_tp, combined.total.stale_fp, combined.total.stale_fn) == (1, 1, 1)
+    assert (combined.stale_precision, combined.stale_recall, combined.extraction_recall) == (0.5, 0.5, 0.75)
+    assert combined.by_type["parameter"].gold == 2 and combined.by_type["parameter"].agree == 1
+    assert combined.by_type["parameter"].stale_fp == 1
+    assert combined.by_type["port"].stale_tp == 1 and combined.by_type["port"].stale_fn == 1
+    assert (combined.extra, combined.non_claim_hits) == (1, 1)
+    assert [(m.claim_id, m.expected, m.got) for m in combined.mismatches] == [("c1", "verified", "stale")]
+    assert combined.missed == [(case.id, "c2")]
+    # The inputs are not modified.
+    assert (perfect.total.gold, flawed.total.gold) == (2, 2)
+    assert perfect.mismatches == [] and len(flawed.mismatches) == 1
+
+
+# ------------------------------------------------------------ load_cases
+
+
+def test_load_cases_reads_every_subdirectory_in_name_order_and_skips_files(tmp_path: Path) -> None:
+    root = tmp_path / "golden"
+    root.mkdir()
+    for name in ("b-case", "a-case"):
+        source = _write_case(tmp_path / f"src-{name}")
+        source.rename(root / name)
+    (root / "README.md").write_text("# not a case\n", encoding="utf-8")
+
+    cases = load_cases(root)
+
+    assert [c.id for c in cases] == ["a-case", "b-case"]
+    assert all(len(c.claims) == 2 for c in cases)
+
+
+def test_load_cases_fails_on_any_broken_case(tmp_path: Path) -> None:
+    root = tmp_path / "golden"
+    root.mkdir()
+    _write_case(tmp_path / "src").rename(root / "a-case")
+    (root / "b-case").mkdir()  # no doc.md / facts.json / gold.json
+    with pytest.raises(GoldenCaseError, match="b-case"):
+        load_cases(root)
 
 
 # --------------------------------------------------------------- oracle
