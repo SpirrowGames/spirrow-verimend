@@ -72,7 +72,7 @@ def reconcile(conn: sqlite3.Connection, run_id: int) -> ReconcileResult:
     ).fetchall()
 
     stats = dict.fromkeys(STAT_KEYS, 0)
-    facts_by_repo: dict[str, list[FactRow]] = {}
+    facts_by_repo: dict[str, Sequence[FactRow]] = {}
     for claim_id, repo, claim_type, subject_json in claims:
         stats["considered"] += 1
         try:
