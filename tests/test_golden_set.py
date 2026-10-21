@@ -105,7 +105,7 @@ def test_open_parameter_and_env_traps_are_deferred_then_unverifiable(cases: list
         assert (claim.deterministic, claim.final) == ("deferred", "unverifiable"), claim.id
 
 
-def test_injected_invalid_covers_broken_json_wrong_type_and_unknown_key(cases: list[GoldenCase]) -> None:
+def test_injected_invalid_has_every_kind_of_breakage(cases: list[GoldenCase]) -> None:
     injected = [i for case in cases for i in case.injected_invalid]
     assert len(injected) >= 3
     raws = [i.raw_subject_json for i in injected]
