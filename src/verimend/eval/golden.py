@@ -172,8 +172,14 @@ def load_case(path: Path | str) -> GoldenCase:
 
 
 def load_cases(root: Path | str = GOLDEN_DIR) -> list[GoldenCase]:
-    """Every case under ``root`` (each subdirectory is one), in name order."""
+    """Every case under ``root`` (each subdirectory is one), in name order.
+
+    A missing ``root`` is an error, not an empty set: scoring zero cases
+    would pass with every metric empty, so absent gold data fails loudly.
+    """
     root = Path(root)
+    if not root.is_dir():
+        raise GoldenCaseError(f"{root}: golden set directory does not exist or is not a directory")
     return [load_case(d) for d in sorted(p for p in root.iterdir() if p.is_dir())]
 
 
