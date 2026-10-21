@@ -1,10 +1,12 @@
 """Migrations must apply to an empty database and be idempotent."""
 
+import re
 import sqlite3
 from pathlib import Path
 
 import pytest
 
+from verimend.claims import CLAIM_TYPES
 from verimend.db import apply_migrations, connection, migrate, pending_migrations
 from verimend.db.migrate import MIGRATIONS_DIR
 
@@ -237,10 +239,25 @@ def test_claim_rejects_unknown_claim_type(tmp_path: Path) -> None:
     """The eight claim types of docs/design.md section 4 are the whole set."""
     migrate(tmp_path / "v.sqlite3")
     with connection(tmp_path / "v.sqlite3") as conn:
-        for claim_type in ("link", "version", "command", "parameter", "port", "path", "behavior", "architecture"):
+        for claim_type in CLAIM_TYPES:
             _run_and_claim(conn, claim_type)
         with pytest.raises(sqlite3.IntegrityError):
             _run_and_claim(conn, "opinion")
+
+
+def test_claim_type_check_and_python_literal_are_the_same_set(tmp_path: Path) -> None:
+    """The list lives twice: the CHECK on claim.claim_type and ``verimend.claims.ClaimType``.
+
+    The test above proves every Python value is accepted; this one reads the
+    CHECK back from the schema, so a value added to the SQL only (accepted by
+    the database, unknown to the code) fails here too.
+    """
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        (ddl,) = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'claim'").fetchone()
+    check = re.search(r"claim_type\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*claim_type\s+IN\s*\(([^)]*)\)", ddl)
+    assert check is not None, ddl
+    assert sorted(re.findall(r"'([^']*)'", check.group(1))) == sorted(CLAIM_TYPES)
 
 
 def test_verdict_result_and_method_are_checked(tmp_path: Path) -> None:
