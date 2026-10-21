@@ -1,0 +1,128 @@
+[
+  {
+    "key": "tool:set_phase",
+    "source_kind": "tool_schema",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/tools/lifecycle.py:312",
+    "content": {
+      "extractor": "mcp_schema",
+      "tool": "set_phase",
+      "function": "set_phase",
+      "description_source": "docstring",
+      "summary": "Manually set the current project phase.",
+      "parameters": [
+        {
+          "name": "project",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "phase",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "user",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        }
+      ],
+      "open_parameters": false,
+      "returns": "dict[str, Any]"
+    }
+  },
+  {
+    "key": "tool:add_milestone",
+    "source_kind": "tool_schema",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/tools/lifecycle.py:482",
+    "content": {
+      "extractor": "mcp_schema",
+      "tool": "add_milestone",
+      "function": "add_milestone",
+      "description_source": "docstring",
+      "summary": "Add a milestone to the project.",
+      "parameters": [
+        {
+          "name": "project",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "name",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "target_date",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "phase",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "description",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "user",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        }
+      ],
+      "open_parameters": false,
+      "returns": "dict[str, Any]"
+    }
+  },
+  {
+    "key": "tool:advance_phase",
+    "source_kind": "tool_schema",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/tools/lifecycle.py:132",
+    "content": {
+      "extractor": "mcp_schema",
+      "tool": "advance_phase",
+      "function": "advance_phase",
+      "description_source": "docstring",
+      "summary": "Advance project to the next phase with completion checks.",
+      "parameters": [
+        {
+          "name": "project",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "force",
+          "annotation": "bool",
+          "default": "False",
+          "required": false
+        },
+        {
+          "name": "completion_threshold",
+          "annotation": "float",
+          "default": "80.0",
+          "required": false
+        },
+        {
+          "name": "user",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        }
+      ],
+      "open_parameters": false,
+      "returns": "dict[str, Any]"
+    }
+  }
+]

@@ -1,0 +1,74 @@
+{
+  "claims": [
+    {
+      "id": "c1",
+      "anchor": [
+        3,
+        3
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "run_workflow",
+        "param": "workflow"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c2",
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "run_workflow",
+        "param": "timeout"
+      },
+      "final": "unverifiable",
+      "deterministic": "deferred",
+      "evidence_keys": [],
+      "note": "open signature (**kwargs): absence proves nothing"
+    },
+    {
+      "id": "c3",
+      "anchor": [
+        5,
+        5
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "notify",
+        "param": "message"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c4",
+      "anchor": [
+        6,
+        6
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "notify",
+        "param": "channel"
+      },
+      "final": "unverifiable",
+      "deterministic": "deferred",
+      "evidence_keys": [],
+      "note": "open signature (*args)"
+    }
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

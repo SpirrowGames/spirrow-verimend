@@ -1,0 +1,62 @@
+{
+  "claims": [
+    {
+      "id": "c1",
+      "anchor": [
+        3,
+        3
+      ],
+      "claim_type": "port",
+      "subject": {
+        "polarity": "current",
+        "port": 8080,
+        "service": "magickit"
+      },
+      "final": "stale",
+      "deterministic": "deferred",
+      "evidence_keys": [
+        "port:8113@start.sh",
+        "port:8113@config/magickit_config.yaml"
+      ],
+      "note": "real port 8113"
+    },
+    {
+      "id": "c2",
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "port",
+      "subject": {
+        "polarity": "current",
+        "port": 8000,
+        "service": "magickit-mcp"
+      },
+      "final": "stale",
+      "deterministic": "verified",
+      "evidence_keys": [
+        "port:8114@src/magickit/config.py"
+      ],
+      "note": "port_literal weak match: 8000 is the GPU exporter, MCP is 8114"
+    },
+    {
+      "id": "c3",
+      "anchor": [
+        5,
+        5
+      ],
+      "claim_type": "port",
+      "subject": {
+        "polarity": "current",
+        "port": 8112,
+        "service": "prismind"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    }
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

@@ -1,0 +1,46 @@
+[
+  {
+    "key": "port:8005@src/magickit/config.py",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/config.py:68",
+    "content": {
+      "extractor": "ports",
+      "port": 8005,
+      "via": "url",
+      "context": "unrealwise_url: str = Field(default=\"http://localhost:8005\")"
+    }
+  },
+  {
+    "key": "port:8005@.env.example",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:.env.example:27",
+    "content": {
+      "extractor": "ports",
+      "port": 8005,
+      "via": "url",
+      "context": "MAGICKIT_UNREALWISE_URL=http://localhost:8005"
+    }
+  },
+  {
+    "key": "port:8115@src/magickit/config.py",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/config.py:71",
+    "content": {
+      "extractor": "ports",
+      "port": 8115,
+      "via": "url",
+      "context": "conclair_url: str = Field(default=\"http://localhost:8115\")"
+    }
+  },
+  {
+    "key": "port:8116@src/magickit/mcp/github_dispatch.py:173",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/github_dispatch.py:173",
+    "content": {
+      "extractor": "ports",
+      "port": 8116,
+      "via": "url",
+      "context": "url = os.environ.get(\"GITHUB_MCP_URL\", \"http://127.0.0.1:8116/mcp\")"
+    }
+  }
+]

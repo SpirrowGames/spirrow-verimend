@@ -1,0 +1,82 @@
+{
+  "claims": [
+    {
+      "id": "c1",
+      "anchor": [
+        3,
+        3
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "set_phase",
+        "param": "project"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c2",
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "set_phase",
+        "param": "phase"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c3",
+      "anchor": [
+        5,
+        5
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "add_milestone",
+        "param": "deadline"
+      },
+      "final": "stale",
+      "deterministic": "stale",
+      "evidence_keys": [
+        "tool:add_milestone"
+      ],
+      "note": "named target_date"
+    },
+    {
+      "id": "c4",
+      "anchor": [
+        6,
+        6
+      ],
+      "claim_type": "behavior",
+      "subject": null,
+      "final": "stale",
+      "deterministic": "deferred",
+      "evidence_keys": [
+        "tool:advance_phase"
+      ],
+      "note": "advance_phase has a force parameter"
+    }
+  ],
+  "non_claims": [
+    {
+      "anchor": [
+        8,
+        8
+      ],
+      "reason": "process advice"
+    }
+  ],
+  "injected_invalid": []
+}

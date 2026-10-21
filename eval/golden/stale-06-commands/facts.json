@@ -1,0 +1,46 @@
+[
+  {
+    "key": "entry:python -m magickit.main",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/main.py:630",
+    "content": {
+      "extractor": "entrypoints",
+      "kind": "python_module",
+      "module": "magickit.main",
+      "command": "python -m magickit.main"
+    }
+  },
+  {
+    "key": "entry:magickit",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:pyproject.toml:49",
+    "content": {
+      "extractor": "entrypoints",
+      "kind": "console_script",
+      "name": "magickit",
+      "target": "magickit.main:main"
+    }
+  },
+  {
+    "key": "entry:magickit-mcp",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:pyproject.toml:50",
+    "content": {
+      "extractor": "entrypoints",
+      "kind": "console_script",
+      "name": "magickit-mcp",
+      "target": "magickit.mcp_server:main"
+    }
+  },
+  {
+    "key": "entry:python -m magickit.deploy.runner",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/deploy/runner.py:913",
+    "content": {
+      "extractor": "entrypoints",
+      "kind": "python_module",
+      "module": "magickit.deploy.runner",
+      "command": "python -m magickit.deploy.runner"
+    }
+  }
+]

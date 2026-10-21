@@ -1,0 +1,57 @@
+[
+  {
+    "key": "port:8113@start.sh",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:start.sh:15",
+    "content": {
+      "extractor": "ports",
+      "port": 8113,
+      "via": "flag",
+      "context": "exec python -m uvicorn magickit.main:app --host 127.0.0.1 --port 8113"
+    }
+  },
+  {
+    "key": "port:8113@config/magickit_config.yaml",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:9",
+    "content": {
+      "extractor": "ports",
+      "port": 8113,
+      "via": "key_value",
+      "context": "port: 8113"
+    }
+  },
+  {
+    "key": "port:8114@config/magickit_config.yaml",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:14",
+    "content": {
+      "extractor": "ports",
+      "port": 8114,
+      "via": "key_value",
+      "context": "port: 8114"
+    }
+  },
+  {
+    "key": "port:8110@config/magickit_config.yaml",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:21",
+    "content": {
+      "extractor": "ports",
+      "port": 8110,
+      "via": "url",
+      "context": "url: \"http://localhost:8110\""
+    }
+  },
+  {
+    "key": "port:8112@config/magickit_config.yaml",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:27",
+    "content": {
+      "extractor": "ports",
+      "port": 8112,
+      "via": "url",
+      "context": "url: \"http://localhost:8112\""
+    }
+  }
+]

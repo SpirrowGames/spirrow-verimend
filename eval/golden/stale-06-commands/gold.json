@@ -1,0 +1,75 @@
+{
+  "claims": [
+    {
+      "id": "c1",
+      "anchor": [
+        3,
+        3
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "python -m magickit.server"
+      },
+      "final": "stale",
+      "deterministic": "deferred",
+      "evidence_keys": [
+        "entry:python -m magickit.main"
+      ],
+      "note": "module is magickit.main"
+    },
+    {
+      "id": "c2",
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "magickit-admin"
+      },
+      "final": "stale",
+      "deterministic": "deferred",
+      "evidence_keys": [
+        "entry:magickit",
+        "entry:magickit-mcp"
+      ],
+      "note": "console scripts are magickit / magickit-mcp"
+    },
+    {
+      "id": "c3",
+      "anchor": [
+        5,
+        5
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "python -m magickit.deploy.runner"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c4",
+      "anchor": [
+        6,
+        6
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "magickit-mcp --transport http"
+      },
+      "final": "unverifiable",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": "prefix match proves the program, not the flag"
+    }
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

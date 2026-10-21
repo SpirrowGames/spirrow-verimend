@@ -1,0 +1,175 @@
+[
+  {
+    "key": "port:8117@spirrow-magickit-mcp-local.service",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:spirrow-magickit-mcp-local.service:28",
+    "content": {
+      "extractor": "ports",
+      "port": 8117,
+      "via": "key_value",
+      "context": "Environment=MAGICKIT_MCP_PORT=8117"
+    }
+  },
+  {
+    "key": "port:8114@config/magickit_config.yaml",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:14",
+    "content": {
+      "extractor": "ports",
+      "port": 8114,
+      "via": "key_value",
+      "context": "port: 8114"
+    }
+  },
+  {
+    "key": "port:8000@config/magickit_config.yaml",
+    "source_kind": "file",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:121",
+    "content": {
+      "extractor": "ports",
+      "port": 8000,
+      "via": "url",
+      "context": "gpu_metrics_url: \"http://localhost:8000/metrics\""
+    }
+  },
+  {
+    "key": "tool:chatroom_post_message",
+    "source_kind": "tool_schema",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/tools/chatroom.py:2071",
+    "content": {
+      "extractor": "mcp_schema",
+      "tool": "chatroom_post_message",
+      "function": "chatroom_post_message",
+      "description_source": "docstring",
+      "summary": "Post a message to an existing thread.",
+      "parameters": [
+        {
+          "name": "project",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "thread_id",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "msg_type",
+          "annotation": "Literal['propose', 'question', 'answer', 'decide', 'report', 'handoff', 'ack']",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "author",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "content",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "reply_to",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "references_threads",
+          "annotation": "list[str] | None",
+          "default": "None",
+          "required": false
+        },
+        {
+          "name": "related_tasks",
+          "annotation": "list[str] | None",
+          "default": "None",
+          "required": false
+        },
+        {
+          "name": "closes_thread",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "tags",
+          "annotation": "list[str] | None",
+          "default": "None",
+          "required": false
+        },
+        {
+          "name": "commit_ref",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "embodiment",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "role",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "naysayer_override_reason",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "owner_override_reason",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "next_participant",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "disposition",
+          "annotation": "dict[str, Any] | None",
+          "default": "None",
+          "required": false
+        }
+      ],
+      "open_parameters": false,
+      "returns": "dict[str, Any]"
+    }
+  },
+  {
+    "key": "entry:magickit",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:pyproject.toml:49",
+    "content": {
+      "extractor": "entrypoints",
+      "kind": "console_script",
+      "name": "magickit",
+      "target": "magickit.main:main"
+    }
+  },
+  {
+    "key": "entry:magickit-mcp",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:pyproject.toml:50",
+    "content": {
+      "extractor": "entrypoints",
+      "kind": "console_script",
+      "name": "magickit-mcp",
+      "target": "magickit.mcp_server:main"
+    }
+  }
+]

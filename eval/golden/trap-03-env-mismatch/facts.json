@@ -1,0 +1,30 @@
+[
+  {
+    "key": "env:MAGICKIT_LOG_FORMAT",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/config.py:79",
+    "content": {
+      "extractor": "config_keys",
+      "kind": "settings_field",
+      "class": "Settings",
+      "field": "log_format",
+      "env": "MAGICKIT_LOG_FORMAT",
+      "annotation": "str",
+      "default": "'json'"
+    }
+  },
+  {
+    "key": "env:MAGICKIT_JWT_SECRET",
+    "source_kind": "config",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/config.py:87",
+    "content": {
+      "extractor": "config_keys",
+      "kind": "settings_field",
+      "class": "Settings",
+      "field": "jwt_secret",
+      "env": "MAGICKIT_JWT_SECRET",
+      "annotation": "str",
+      "default": "'change-me-in-production-use-strong-secret'"
+    }
+  }
+]

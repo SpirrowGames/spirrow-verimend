@@ -1,0 +1,78 @@
+{
+  "claims": [
+    {
+      "id": "c1",
+      "anchor": [
+        3,
+        3
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "chatroom_post_message",
+        "param": "msg_type"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c2",
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "chatroom_post_message",
+        "param": "author"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c3",
+      "anchor": [
+        5,
+        5
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "chatroom_post_message",
+        "param": "in_reply_to"
+      },
+      "final": "stale",
+      "deterministic": "stale",
+      "evidence_keys": [
+        "tool:chatroom_post_message"
+      ],
+      "note": "renamed reply_to"
+    },
+    {
+      "id": "c4",
+      "anchor": [
+        6,
+        6
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "tool": "chatroom_post_message",
+        "param": "close"
+      },
+      "final": "stale",
+      "deterministic": "stale",
+      "evidence_keys": [
+        "tool:chatroom_post_message"
+      ],
+      "note": "renamed closes_thread"
+    }
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

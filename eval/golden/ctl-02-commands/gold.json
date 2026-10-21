@@ -1,0 +1,80 @@
+{
+  "claims": [
+    {
+      "id": "c1",
+      "anchor": [
+        3,
+        3
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "magickit"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": "console script"
+    },
+    {
+      "id": "c2",
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "magickit-mcp"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": "console script"
+    },
+    {
+      "id": "c3",
+      "anchor": [
+        5,
+        5
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "python -m magickit.main"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": "python -m"
+    },
+    {
+      "id": "c4",
+      "anchor": [
+        6,
+        6
+      ],
+      "claim_type": "command",
+      "subject": {
+        "polarity": "current",
+        "command": "python -m magickit.mcp_server"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": "python -m"
+    }
+  ],
+  "non_claims": [],
+  "injected_invalid": [
+    {
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "command",
+      "raw_subject_json": "{\"polarity\": \"current\", \"command\": \"magickit-mcp\", \"args\": [\"--http\"]}",
+      "note": "unknown key"
+    }
+  ]
+}

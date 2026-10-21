@@ -1,0 +1,110 @@
+[
+  {
+    "key": "tool:deploy_request",
+    "source_kind": "tool_schema",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/tools/deploy.py:126",
+    "content": {
+      "extractor": "mcp_schema",
+      "tool": "deploy_request",
+      "function": "deploy_request",
+      "description_source": "docstring",
+      "summary": "Ask for a target's `origin/main` to be deployed. Does NOT deploy.",
+      "parameters": [
+        {
+          "name": "target",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "requested_by",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "reason",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        }
+      ],
+      "open_parameters": false,
+      "returns": "dict[str, Any]"
+    }
+  },
+  {
+    "key": "tool:deploy_approve",
+    "source_kind": "tool_schema",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/tools/deploy.py:379",
+    "content": {
+      "extractor": "mcp_schema",
+      "tool": "deploy_approve",
+      "function": "deploy_approve",
+      "description_source": "docstring",
+      "summary": "Approve a pending deploy request and start it.",
+      "parameters": [
+        {
+          "name": "request_id",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "approved_by",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        },
+        {
+          "name": "note",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "override_ref",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "override_reason",
+          "annotation": "str",
+          "default": "''",
+          "required": false
+        },
+        {
+          "name": "override_allows_migration",
+          "annotation": "bool",
+          "default": "False",
+          "required": false
+        }
+      ],
+      "open_parameters": false,
+      "returns": "dict[str, Any]"
+    }
+  },
+  {
+    "key": "tool:deploy_status",
+    "source_kind": "tool_schema",
+    "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:src/magickit/mcp/tools/deploy.py:298",
+    "content": {
+      "extractor": "mcp_schema",
+      "tool": "deploy_status",
+      "function": "deploy_status",
+      "description_source": "docstring",
+      "summary": "Read a deploy request and, once it has run, its full result.",
+      "parameters": [
+        {
+          "name": "request_id",
+          "annotation": "str",
+          "default": null,
+          "required": true
+        }
+      ],
+      "open_parameters": false,
+      "returns": "dict[str, Any]"
+    }
+  }
+]

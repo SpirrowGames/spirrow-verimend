@@ -144,6 +144,19 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 
 - 決定的チェッカー: 通常の unit test
 - LLM 工程: ゴールデンセットによる回帰評価。既知の乖離（廃止済み記述）を仕込んだドキュメント 20〜30件を正解付きで用意し、stale 検出の precision/recall を計測
+- ゴールデンセットの実装メモ（T05: `eval/golden/`、採点器 `verimend/eval/golden.py`、詳細は `eval/golden/README.md`）:
+  - 置き場所は `eval/golden/<case-id>/`。テスト用の偽データではなく評価資産なので `tests/` の外に置く。1 ケース = `doc.md`（評価対象。1 チャンク 2000 トークン以下）+ `facts.json`（凍結したファクト `[{key, source_kind, source_ref, content}]`）+ `gold.json`（`{claims, non_claims, injected_invalid}`）
+  - ファクトは spirrow-magickit の固定 commit から M1 の抽出器で取ったもの（commit は README に記録）。実データに例の無い罠（`open_parameters` を持つツール、同名ツール 2 定義）のファクトだけ作り足し、`source_ref` を `<repo>@golden-injected:...` とする
+  - 正解ラベルは 2 層:
+    - `final`（`verified` / `stale` / `unverifiable`）: 凍結ファクトに照らした真の答え。extractor 込みの end-to-end 採点に使う
+    - `deterministic`（`verified` / `stale` / `deferred`）: 正しい subject を受け取った M2a reconciler の期待値。oracle モードの採点に使う。`deferred` は「verdict 行がまだ無い」状態で、`verdict.result` の値ではない。チェッカーの無い種別、`polarity != current` のクレームは常に `deferred`
+    - 両者は一致しなくてよい（否定文は deterministic=`deferred` / final=`verified`、`port_literal` の弱い一致は deterministic=`verified` / final=`stale`）
+  - subject は `verimend.claims` で検証できる形。`port` / `parameter` / `command` は必須、モデルの無い種別は null（モデルはチェッカーと同じ PR で入る）。stale のラベルには `evidence_keys`（`facts.json` の key）が必須
+  - 決定的段で `unverifiable` を期待するのは `injected_invalid`（壊れた JSON・型違い・未知キーの `raw_subject_json`）だけ。oracle にだけ流し、`unverifiable` / `subject_schema_violation` で確定し `invalid_subject` に数えられることを確かめる
+  - 正解データの不備（anchor の範囲外、実在しない evidence key、モデルに通らない subject、同じ種別で anchor が重なる 2 クレーム）は `GoldenCaseError`。抽出器の故障と違って封じ込めない（壊れたラベルでの評価は無意味）
+  - 採点 `score(case, predicted, layer)`: 同じ `claim_type` で anchor の行範囲が重なるものを、重なりの大きい順に貪欲に 1 対 1 で対応付ける。対応しない予測は余分な抽出（`non_claims` に重なれば誤抽出にも数える）。主指標は stale の precision / recall で、根拠の key が正解の `evidence_keys` と 1 つも重ならない stale は誤り。副指標は抽出 recall、余分な抽出、種別ごとの内訳。verdict の無い予測は `deferred`
+  - oracle モード `run_oracle(case)`: 一時 DB に crawl_run・ファクト・正解 subject を持つ claim（＋ `injected_invalid`）を入れて `reconcile()` を実行し、deterministic 層で採点する。テストは全ケースで `deterministic` 欄との完全一致を要求する
+  - CI で precision 閾値を gate にするかは、extractor の PR 以降に判断する
 - 稼働基準: stale 判定の precision 90% 以上で夜間定期実行を有効化（それまでは手動トリガーのみ）
 - メトリクス: PR マージ率・マージ前修正率を run ごとに記録し、自動化範囲拡大の判断材料とする
 

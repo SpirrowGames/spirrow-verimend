@@ -1,0 +1,67 @@
+{
+  "claims": [
+    {
+      "id": "c1",
+      "anchor": [
+        3,
+        3
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "env": "MAGICKIT_DB_PATH"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c2",
+      "anchor": [
+        4,
+        4
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "env": "MAGICKIT_LOG_LEVEL"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c3",
+      "anchor": [
+        5,
+        5
+      ],
+      "claim_type": "parameter",
+      "subject": {
+        "polarity": "current",
+        "env": "MAGICKIT_MCP_PORT"
+      },
+      "final": "verified",
+      "deterministic": "verified",
+      "evidence_keys": [],
+      "note": ""
+    },
+    {
+      "id": "c4",
+      "anchor": [
+        6,
+        6
+      ],
+      "claim_type": "architecture",
+      "subject": null,
+      "final": "verified",
+      "deterministic": "deferred",
+      "evidence_keys": [],
+      "note": "data/magickit.db default"
+    }
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}
