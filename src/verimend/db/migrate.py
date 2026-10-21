@@ -19,9 +19,9 @@ attempt; statements that are not re-runnable turn it into a manual repair.
 The same requirement is stated in ``migrations/README.md``, where the next
 person to add a ``.sql`` file will actually read it.
 
-Only the tables the M1 collector actually writes exist so far (``crawl_run``
-and ``fact``). ``claim`` / ``verdict`` / ``metric`` from docs/design.md
-section 4 arrive as later migrations, when the code that writes them does.
+Tables arrive with the code that writes them: ``crawl_run`` / ``fact`` (M1
+collector), ``claim`` / ``verdict`` (M2 reconciler). ``metric`` from
+docs/design.md section 4 arrives as a later migration (M3).
 """
 
 from __future__ import annotations

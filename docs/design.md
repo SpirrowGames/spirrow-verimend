@@ -53,7 +53,7 @@ crawl_run(id, started_at, finished_at, status, pr_url, thread_id, stats_json)
 fact(id, run_id, source_kind, source_ref, content, content_hash)
   source_kind: file | tool_schema | service_health | config
 claim(id, run_id, doc_repo, doc_path, anchor_start, anchor_end,
-      text, claim_type, extraction_model)
+      text, claim_type, extraction_model, subject_json)
   claim_type: link | version | command | parameter | port | path |
               behavior | architecture
 verdict(id, claim_id, result, method, evidence_json, patch_draft)
@@ -63,6 +63,13 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 ```
 
 同一ドキュメントのクレームは content_hash で前回実行と突合し、未変更なら抽出をスキップ（増分クロール）。
+
+- `subject_json`（M2a で追加）: extractor が文脈を読んだうえで出力する、クレームの構造化 subject。NULL 可。スキーマの正本は `verimend/claims.py`（Pydantic、strict・未知キー禁止）。extractor の出力スキーマと T05 の正解ラベルはこれに揃える
+  - 共通: `polarity` = `current`（現在の事実として主張）| `negated`（「8080 は使わない」）| `historical`（「8080 から 9000 に変更」の 8080 側）
+  - `port`: `{port: int(1-65535), service: str|null}` / `parameter`: `{tool, param}` または `{env}` / `command`: `{command}`
+  - 他の claim_type の subject モデルは、それを照合するチェッカーと同じ PR で追加する
+- `verdict.claim_id` は UNIQUE（1 クレーム 1 判定）。claim / verdict は `crawl_run` の削除に CASCADE で追従する
+- ドキュメント単位の `content_hash` は、それを書く extractor の PR で追加する（M2a には無い）
 
 ## 5. パイプライン詳細
 
@@ -94,6 +101,18 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 
 ### 5.3 reconciler
 - 照合順序: 決定的チェッカー（link/version/command/parameter/port/path）→ 該当しないタイプのみ LLM 判定
+- 決定的チェッカーが照合するのは **構造化 subject（`subject_json`）だけ**。クレーム本文（自然言語）には正規表現を当てない。否定・対比・履歴の解釈は extractor の責務で、チェッカーは `polarity == current` の subject しか照合しない
+- 実装メモ（M2a: `verimend/reconciler/`、チェッカーは `port` / `parameter` / `command`）:
+  - 対象は run 内で verdict の無いクレーム。照合に使うファクトは同じ run・同じリポジトリ（`source_ref` が `<doc_repo>@` で始まるもの）だけ
+  - subject の状態ごとの扱い: NULL / `polarity != current` / チェッカーが決められない → verdict を書かず `deferred`（後続の LLM 判定へ）。JSON として読めない・スキーマ違反 → その場で `unverifiable` / `deterministic` を確定（evidence `{"checker","error":"subject_schema_violation","detail"}`、`log.error`）し `invalid_subject` に数える。抽出器の故障であって「判定不能」ではないので LLM 判定には流さず、1 件の故障で run は落とさない（5.2 と同じ封じ込め）
+  - stale は **矛盾するファクトが実在するときだけ**。「ファクトに見当たらない」は stale にしない（抽出器が失敗すればファクトは 0 件なので、不在は何も証明しない）
+    - `port`: `ports` ファクトに同じ番号があれば verified（`match: "port_literal"` — サービスとの対応までは見ていない弱い一致）。無ければ保留
+    - `parameter`（tool）: そのツールの定義のどれかに param があれば verified。stale は、そのツールの `tool_schema` ファクトがちょうど 1 件・`parameters` が NULL でない・`open_parameters == false`・`tool_expr` が無い、をすべて満たし、なお param が無いときだけ。それ以外は保留
+    - `parameter`（env）: `config_keys` に一致があれば verified、無ければ保留（stale なし）
+    - `command`: `entrypoints` の宣言（console script 名 / `python -m X` / `ExecStart`）と一致すれば verified（`match: "exact"`、引数付きの前方一致は `"prefix"`）。無ければ保留（stale なし）
+  - evidence の形: `{"checker","fact_ids","reason"[,"match"]}`
+  - run の `stats_json.reconcile` に run 全体の集計（`verified` / `stale` / `unverifiable` / `deferred` / `invalid_subject`）を表から再計算して書く。再実行は verdict の無いクレームだけを見るので重複しない
+  - `mcp_schema` の content に `open_parameters`（`*args` / `**kwargs` があれば true、関数を解決できなければ null）を追加。これが無いと閉じたシグネチャと任意の名前を受け取るシグネチャが区別できない
 - LLM 判定の入力: クレーム＋検索（BM25。v1 は rank-bm25 で十分、必要になったら Prismind の BGE-M3 を併用）で絞った上位ファクト最大5件
 - 出力: result + 根拠ファクトID + 短い理由。根拠ファクトの提示がない stale 判定は unverifiable に降格（幻覚ガード）
 

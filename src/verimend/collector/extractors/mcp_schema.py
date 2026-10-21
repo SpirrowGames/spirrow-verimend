@@ -11,6 +11,11 @@ use); the attribute being called ``tool`` is what identifies a registration.
 The recorded parameters are the function signature as written -- names,
 annotations and defaults as source text -- minus any parameter annotated as
 FastMCP's ``Context``, which FastMCP injects and hides from the tool schema.
+``*args`` / ``**kwargs`` have no name a caller could use, so they are not
+listed; ``open_parameters`` records that they exist. A tool with an open
+signature accepts names its ``parameters`` do not show, so the list is complete
+only when ``open_parameters`` is false. When the function cannot be resolved,
+both ``parameters`` and ``open_parameters`` are None (unknown, not guessed).
 Nothing is imported or executed, so the facts are exactly what the code says,
 even for a tool whose module would fail to import on this host.
 """
@@ -101,9 +106,11 @@ def _describe(function_name: str, function: FunctionNode | None, registration: a
 
     if function is None:
         content["parameters"] = None
+        content["open_parameters"] = None
         content["returns"] = None
     else:
         content["parameters"] = _parameters(function)
+        content["open_parameters"] = function.args.vararg is not None or function.args.kwarg is not None
         content["returns"] = source_of(function.returns)
     return content
 
