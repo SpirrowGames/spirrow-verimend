@@ -2,7 +2,8 @@
 
 Labelled documents for measuring the reconciler, as described in docs/design.md §8.
 The loader, scorer and oracle are in `src/verimend/eval/golden.py`. The tests that
-check this data are in `tests/test_golden.py`.
+check this data are in `tests/test_golden_set.py`; the unit tests for the
+loader and scorer are in `tests/test_golden.py`.
 
 ## Where the facts come from
 
