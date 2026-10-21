@@ -1,6 +1,7 @@
 # Reading threads
 
-`chatroom_get_thread` takes `project` and `thread_id`,
+`chatroom_get_thread` takes `project`,
+then `thread_id`,
 and an optional `mode`.
 `chatroom_list_threads` filters by `status_filter`
 and pages with `limit`.
