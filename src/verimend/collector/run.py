@@ -34,6 +34,8 @@ log = logging.getLogger(__name__)
 
 # (repo "owner/name", destination directory) -> checked-out commit SHA
 Checkout = Callable[[str, Path], str]
+# (target, its checked-out tree, commit) -> None; see collect_targets
+DocSink = Callable[[Target, RepoTree, str], None]
 
 STATUS_RUNNING = "running"
 STATUS_SUCCEEDED = "succeeded"
@@ -92,26 +94,54 @@ def collect(
     ``service_health`` gets an error for it (the run is ``partial``) rather
     than a silent skip.
     """
-    registry = extractors.extractors_for(health_source or _no_health_source)
+    run_id = start_run(conn)
+    stats: dict[str, Any] = {"targets": {}}
+    try:
+        collect_targets(conn, run_id, targets, checkout, health_source, stats=stats)
+    except BaseException:
+        conn.rollback()
+        finish_run(conn, run_id, STATUS_FAILED, stats)
+        raise
+    status = STATUS_PARTIAL if has_errors(stats) else STATUS_SUCCEEDED
+    finish_run(conn, run_id, status, stats)
+    return CollectResult(run_id=run_id, status=status, stats=stats)
+
+
+def start_run(conn: sqlite3.Connection) -> int:
+    """Insert a ``running`` crawl_run and return its id."""
     run_id = conn.execute(
         "INSERT INTO crawl_run (started_at, status) VALUES (?, ?)",
         (_now(), STATUS_RUNNING),
     ).lastrowid
     conn.commit()
+    return run_id
 
-    stats: dict[str, Any] = {"targets": {}}
-    try:
-        for target in targets:
-            stats["targets"][target.repo] = _collect_target(conn, run_id, target, checkout, registry)
-            conn.commit()
-    except BaseException:
-        conn.rollback()
-        _finish(conn, run_id, STATUS_FAILED, stats)
-        raise
 
-    status = STATUS_PARTIAL if _has_errors(stats) else STATUS_SUCCEEDED
-    _finish(conn, run_id, status, stats)
-    return CollectResult(run_id=run_id, status=status, stats=stats)
+def collect_targets(
+    conn: sqlite3.Connection,
+    run_id: int,
+    targets: Sequence[Target],
+    checkout: Checkout,
+    health_source: HealthSource | None = None,
+    doc_sink: DocSink | None = None,
+    stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Store the facts of every target into run ``run_id``; return the run's stats.
+
+    The stats go into ``stats`` when given (so a caller that catches an error
+    still has what was collected before it), else into a new dict.
+
+    ``doc_sink`` is called once per checked-out target with the target and its
+    ``RepoTree``, while the checkout still exists. The pipeline uses it to read
+    the documents from the very commit the facts came from.
+    """
+    registry = extractors.extractors_for(health_source or _no_health_source)
+    stats = {"targets": {}} if stats is None else stats
+    stats.setdefault("targets", {})
+    for target in targets:
+        stats["targets"][target.repo] = _collect_target(conn, run_id, target, checkout, registry, doc_sink)
+        conn.commit()
+    return stats
 
 
 def _collect_target(
@@ -120,6 +150,7 @@ def _collect_target(
     target: Target,
     checkout: Checkout,
     registry: dict[Any, extractors.Extractor],
+    doc_sink: DocSink | None = None,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="verimend-") as tmp:
         dest = Path(tmp) / "repo"
@@ -147,11 +178,13 @@ def _collect_target(
                 ],
             )
             result["extractors"][name.value] = {"facts": len(facts)}
+        if doc_sink is not None:
+            doc_sink(target, tree, commit)
         result["skipped_files"] = dict(sorted(tree.skipped.items()))
         return result
 
 
-def _finish(conn: sqlite3.Connection, run_id: int, status: str, stats: dict[str, Any]) -> None:
+def finish_run(conn: sqlite3.Connection, run_id: int, status: str, stats: dict[str, Any]) -> None:
     conn.execute(
         "UPDATE crawl_run SET finished_at = ?, status = ?, stats_json = ? WHERE id = ?",
         (_now(), status, canonical_json(stats), run_id),
@@ -163,7 +196,7 @@ def _no_health_source() -> dict[str, Any]:
     raise HealthSourceError("no health source configured (VERIMEND_MAGICKIT_URL)")
 
 
-def _has_errors(stats: dict[str, Any]) -> bool:
+def has_errors(stats: dict[str, Any]) -> bool:
     for target in stats["targets"].values():
         if "error" in target:
             return True

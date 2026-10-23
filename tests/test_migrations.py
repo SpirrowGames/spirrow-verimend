@@ -10,8 +10,8 @@ from verimend.claims import CLAIM_TYPES
 from verimend.db import apply_migrations, connection, migrate, pending_migrations
 from verimend.db.migrate import MIGRATIONS_DIR
 
-EXPECTED_TABLES = {"crawl_run", "fact", "claim", "verdict", "schema_migration"}
-ALL_VERSIONS = ["0001_crawl_run_and_fact", "0002_claim_and_verdict"]
+EXPECTED_TABLES = {"crawl_run", "fact", "claim", "verdict", "document", "schema_migration"}
+ALL_VERSIONS = ["0001_crawl_run_and_fact", "0002_claim_and_verdict", "0003_document"]
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -355,3 +355,32 @@ def test_migrate_closes_the_connection_it_opened(tmp_path: Path, monkeypatch) ->
             conn.execute("SELECT 1")
 
     db.unlink()
+
+
+def test_document_table_has_the_cache_key_and_a_status_check(tmp_path: Path) -> None:
+    """0003: the five-value cache key, one row per document per run, three statuses."""
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        assert _columns(conn, "document") == [
+            "id",
+            "run_id",
+            "doc_repo",
+            "doc_path",
+            "content_hash",
+            "extractor_key",
+            "chunk_hash",
+            "status",
+        ]
+        run_id, _ = _run_and_claim(conn)
+        insert = (
+            "INSERT INTO document (run_id, doc_repo, doc_path, content_hash, extractor_key, chunk_hash, status)"
+            " VALUES (?, 'o/r', ?, 'c', 'k', 'h', ?)"
+        )
+        for i, status in enumerate(("extracted", "cached", "failed")):
+            conn.execute(insert, (run_id, f"d{i}.md", status))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(insert, (run_id, "x.md", "partial"))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(insert, (run_id, "d0.md", "extracted"))
+        conn.execute("DELETE FROM crawl_run WHERE id = ?", (run_id,))
+        assert conn.execute("SELECT count(*) FROM document").fetchone()[0] == 0

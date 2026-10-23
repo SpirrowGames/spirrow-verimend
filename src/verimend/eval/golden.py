@@ -436,14 +436,7 @@ def run_oracle(case: GoldenCase) -> OracleResult:
         run_id = conn.execute(
             "INSERT INTO crawl_run (started_at, status) VALUES ('1970-01-01T00:00:00+00:00', 'succeeded')"
         ).lastrowid
-        key_of: dict[int, str] = {}
-        for f in case.facts:
-            content = canonical_json(f.content)
-            fact_id = conn.execute(
-                "INSERT INTO fact (run_id, source_kind, source_ref, content, content_hash) VALUES (?, ?, ?, ?, ?)",
-                (run_id, f.source_kind, f.source_ref, content, hashlib.sha256(content.encode("utf-8")).hexdigest()),
-            ).lastrowid
-            key_of[fact_id] = f.key
+        key_of = insert_facts(conn, run_id, case)
 
         gold_ids = [
             _insert_claim(conn, run_id, case, c.anchor, c.claim_type, None if c.subject is None else canonical_json(c.subject))
@@ -491,6 +484,19 @@ def run_oracle(case: GoldenCase) -> OracleResult:
         injected=tuple(injected),
         totals=totals,
     )
+
+
+def insert_facts(conn: sqlite3.Connection, run_id: int, case: GoldenCase) -> dict[int, str]:
+    """Store the case's frozen facts into ``run_id``. Returns fact id -> golden key."""
+    key_of: dict[int, str] = {}
+    for f in case.facts:
+        content = canonical_json(f.content)
+        fact_id = conn.execute(
+            "INSERT INTO fact (run_id, source_kind, source_ref, content, content_hash) VALUES (?, ?, ?, ?, ?)",
+            (run_id, f.source_kind, f.source_ref, content, hashlib.sha256(content.encode("utf-8")).hexdigest()),
+        ).lastrowid
+        key_of[fact_id] = f.key
+    return key_of
 
 
 def _insert_claim(
