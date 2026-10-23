@@ -1,6 +1,6 @@
 # Verimend 設計ドキュメント
 
-ステータス: 実装着手可能 / 最終更新: 2026-08-28
+ステータス: 実装着手可能 / 最終更新: 2026-10-23
 
 ## 1. 目的とスコープ
 
@@ -69,7 +69,11 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
   - `port`: `{port: int(1-65535), service: str|null}` / `parameter`: `{tool, param}` または `{env}` / `command`: `{command}`
   - 他の claim_type の subject モデルは、それを照合するチェッカーと同じ PR で追加する
 - `verdict.claim_id` は UNIQUE（1 クレーム 1 判定）。claim / verdict は `crawl_run` の削除に CASCADE で追従する
-- ドキュメント単位の `content_hash` は、それを書く extractor の PR で追加する（M2a には無い）
+- ドキュメント単位の増分抽出は実装済み（M2b、migration 0003）:
+  - `document(run_id, doc_repo, doc_path, content_hash, extractor_key, chunk_hash, status)`。`status` = `extracted` | `cached` | `failed`
+  - `content_hash` = 文書本文の SHA-256。`extractor_key` = プロンプトファイル・ティア・出力スキーマ版の SHA-256。`chunk_hash` = 計算したチャンク境界の SHA-256（境界の規則を変えて境界が動けば、版番号を上げなくてもキャッシュが外れる）
+  - 前回までの run で、この 5 つ（`doc_repo` / `doc_path` を含む）がすべて一致し、`status` が `extracted` か `cached` の文書があれば、LLM を呼ばずにその run の claim を verdict 無しで複製する
+  - キャッシュの参照元にしないもの: 失敗または打ち切りのチャンクを 1 件でも含む文書（`status = failed`）、`failed` の run、実行中の run
 
 ## 5. パイプライン詳細
 
@@ -95,9 +99,30 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
   - 届かない / timeout / 応答不正 / `services` が空 → その target の error、ファクト 0 件、run は `partial`。URL 未設定も同じ扱い
 
 ### 5.2 extractor（LLM）
-- 入力は見出し単位のチャンク（数百〜2000トークン程度）。長コンテキストに依存しない
-- 出力は JSON（クレーム配列）。スキーマ違反は1回リトライ→失敗時はそのチャンクを unverifiable 扱いで記録（パイプラインは止めない）
-- 意見・方針・将来計画の記述はクレーム化しない（検証不能な規範的記述の除外ルールをプロンプトに明記）
+- 入力は見出し単位のチャンク（2000 トークン以下、文字数から近似: ASCII 4 文字 = 1、それ以外 1 文字 = 1）。長コンテキストに依存しない
+  - 見出し（fenced code の中の `#` は見出しではない）で切り、2000 を超える節は段落の境界で、それでも超えれば行の境界で分ける。1 行だけで上限を超えるチャンクは LLM を呼ばずに `oversized_line` のチャンク失敗
+  - LLM には文書の絶対行番号付きで渡し、anchor も絶対行番号で返させる
+- 出力は JSON（クレーム配列 `[{anchor_start, anchor_end, text, claim_type, subject}]`）
+  - 外枠の違反: JSON でない / 配列でない / キーの過不足 / 未知の `claim_type` / チャンク外の anchor / start > end
+  - subject の違反: `verimend.claims.parse_subject` で通らない、モデルの無い種別で null でない
+  - どちらかの違反があれば、違反の要約を添えて 1 回だけ再試行。再試行後も外枠が壊れていればチャンク失敗（`schema`、claim は 0 件）。外枠が正しく subject だけが違反している claim は生の `subject_json` のまま保存し、reconciler で `invalid_subject` になる
+- 意見・方針・将来計画の記述はクレーム化しない（検証不能な規範的記述の除外ルールをプロンプト `verimend/extractor/prompt.md` に明記）
+- 実装メモ（M2b: `verimend/extractor/`、パイプラインは `verimend/pipeline.py`、CLI は `verimend run`）:
+  - Lexora の `/v1/chat/completions` をティア名（既定 `light`）で呼ぶ。設定は `VERIMEND_LEXORA_URL`（既定なし）、`VERIMEND_LEXORA_TIMEOUT_S`（httpx の timeout にだけ使う）、`VERIMEND_LEXORA_RETRY_AFTER_MAX_S`（既定 120、timeout とは独立）、`VERIMEND_EXTRACTOR_TIER`
+  - 文書は collector と同じ checkout から読む（`targets.yaml` の `doc_globs`。`**/` は 0 個以上のディレクトリ）。claim と照合するファクトは常に同じ commit
+- 失敗の区分:
+
+| 区分 | 該当 | 扱い | 本番の run | 評価（`run_e2e`） |
+|---|---|---|---|---|
+| 設定の誤り | `lexora_url` 未設定（チャンクを作る前に検査）、401、403 | `ExtractorConfigError`、再試行しない | run を `failed`、`stats_json.extract.config_error`（`lexora_url_unset` / `http_401` / `http_403`）、reconcile しない、0 以外で終了、保存済みのファクトは残す | 例外を伝え、点数は出さない |
+| 一時的 | timeout、接続エラー、5xx、429、408 | 1 回だけ再試行。429 / 503 の `Retry-After`（0 以上の整数の秒数のみ）が上限以下ならその秒数、それ以外（ヘッダ無し、HTTP-date、読めない値、他の status）は 2 秒待つ | 再試行も失敗したらチャンク失敗（`http_<status>` / `transport`）。チャンクをまたいで連続 3 回で打ち切り（`consecutive_transient_failures`）。成功したチャンクで数は 0 に戻る | 1 件でも失敗したら `ExtractorAborted` |
+| 一時的・待てない | 429 / 503 で `Retry-After` > `lexora_retry_after_max_s` | 再試行しない | その場で打ち切り（`retry_after_exceeds_max`）。次のチャンクは送らない | `ExtractorAborted` |
+| 恒久的 | 上記以外の 4xx（400、413、422 など）、`oversized_line`、`schema` | 再試行しない（`schema` は上の出力の再試行のみ）。連続失敗の数に入れない | チャンク失敗、run は `partial` | 点数に反映する（抽出器の品質） |
+
+- 打ち切り: 残りのチャンク（以降の文書を含む）は Lexora を呼ばずに `extractor_aborted` のチャンク失敗。`stats_json.extract.aborted` = `{reason, at_chunk: {doc_repo, doc_path, lines}[, retry_after_s]}`。run は `partial` で、抽出できた分は reconcile する。打ち切られた文書は `failed` なので次の run で抽出し直される
+- チャンク失敗は `stats_json.extract.failed_chunks` に `{doc_repo, doc_path, lines, error}` で記録する。`error` は `schema` / `http_<status>` / `transport` / `oversized_line` / `extractor_aborted`。偽の claim 行は入れない
+- `partial` と `failed` の境界: `failed` は環境が壊れている（設定の誤り）か想定外の例外。`partial` は一時的な停止・打ち切り・チャンク単位の失敗（collector の失敗と同じ封じ込め）。どちらも 0 以外で終了する
+- 評価: `python -m verimend.eval`（要 `VERIMEND_LEXORA_URL`）が golden set の各ケースを `run_e2e` に通し、deterministic 層で採点する。CI では閾値ゲートを入れない（テストは録画済みの応答で 1 ケースを通す）
 
 ### 5.3 reconciler
 - 照合順序: 決定的チェッカー（link/version/command/parameter/port/path）→ 該当しないタイプのみ LLM 判定

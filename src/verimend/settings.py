@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     # extractor fail loudly (run ``partial``) rather than probe a guessed host.
     magickit_url: str | None = None
     magickit_timeout_s: float = 60.0
+    # Lexora's OpenAI-compatible API (e.g. http://host:8110), used by the
+    # extractor. No default: an unset URL fails the run (``failed``) before any
+    # chunk is built, rather than producing a run with zero claims.
+    lexora_url: str | None = None
+    # The httpx connect/read timeout of one Lexora request, and nothing else.
+    lexora_timeout_s: float = 120.0
+    # The longest Retry-After (429 / 503) the extractor will wait out. A longer
+    # one aborts the extraction stage at once. Independent of lexora_timeout_s.
+    lexora_retry_after_max_s: float = 120.0
+    # The Lexora tier the extractor asks for (docs/design.md 6).
+    extractor_tier: str = "light"
 
 
 def get_settings() -> Settings:

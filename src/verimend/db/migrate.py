@@ -20,7 +20,7 @@ The same requirement is stated in ``migrations/README.md``, where the next
 person to add a ``.sql`` file will actually read it.
 
 Tables arrive with the code that writes them: ``crawl_run`` / ``fact`` (M1
-collector), ``claim`` / ``verdict`` (M2 reconciler). ``metric`` from
+collector), ``claim`` / ``verdict`` (M2 reconciler), ``document`` (M2b extractor). ``metric`` from
 docs/design.md section 4 arrives as a later migration (M3).
 """
 

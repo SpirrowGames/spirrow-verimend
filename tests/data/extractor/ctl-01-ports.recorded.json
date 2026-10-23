@@ -1,0 +1,25 @@
+{
+  "case": "ctl-01-ports",
+  "tier": "light",
+  "recorded_from": "Lexora light tier, 2026-10-23",
+  "responses": [
+    {
+      "lines": [
+        1,
+        2
+      ],
+      "attempt": 0,
+      "model": "Qwen3.8-27B",
+      "content": "[]"
+    },
+    {
+      "lines": [
+        3,
+        10
+      ],
+      "attempt": 0,
+      "model": "Qwen3.8-27B",
+      "content": "[\n  {\n    \"anchor_start\": 5,\n    \"anchor_end\": 5,\n    \"text\": \"The REST API listens on port 8113.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"current\",\n      \"port\": 8113,\n      \"service\": \"REST API\"\n    }\n  },\n  {\n    \"anchor_start\": 6,\n    \"anchor_end\": 6,\n    \"text\": \"The MCP server listens on port 8114.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"current\",\n      \"port\": 8114,\n      \"service\": \"MCP server\"\n    }\n  },\n  {\n    \"anchor_start\": 7,\n    \"anchor_end\": 7,\n    \"text\": \"Lexora is expected at http://localhost:8110.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"current\",\n      \"port\": 8110,\n      \"service\": \"Lexora\"\n    }\n  },\n  {\n    \"anchor_start\": 8,\n    \"anchor_end\": 8,\n    \"text\": \"Prismind is expected at http://localhost:8112.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"current\",\n      \"port\": 8112,\n      \"service\": \"Prismind\"\n    }\n  }\n]"
+    }
+  ]
+}
