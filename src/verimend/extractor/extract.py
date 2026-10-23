@@ -8,7 +8,7 @@ below -- the table in design 5.2 is the specification, this is its code:
 class               which failures                   retry               on final failure
 ==================  ===============================  ==================  ==========================
 configuration       ``lexora_url`` unset, HTTP 401,  none                ``ExtractorConfigError``:
-                    HTTP 403                                             the run is ``failed``
+                    HTTP 403, HTTP 404                                   the run is ``failed``
 transient           timeout, connection error, 5xx,  once, after         chunk failure; three in a
                     429, 408                         ``Retry-After``     row across chunks aborts
                                                      (integer seconds,   the stage
@@ -16,18 +16,25 @@ transient           timeout, connection error, 5xx,  once, after         chunk f
                                                      2 s
 transient, too      429 / 503 with ``Retry-After``   none                abort the stage at once
 long to wait        over ``retry_after_max_s``
-permanent           any other 4xx                    none                chunk failure
+permanent           any other 4xx                    none                chunk failure; three 4xx
+                                                                         in a row (no successful
+                                                                         Lexora call between)
+                                                                         abort the stage
                     ``oversized_line``               (LLM not called)    chunk failure
                     ``schema`` (malformed output)    once, with the      chunk failure
                                                      violations
 ==================  ===============================  ==================  ==========================
+
+The HTTP classification and the retry live in ``verimend.llm_policy``, shared
+with the reconciler's LLM judge.
 
 After an abort every remaining chunk of the run is failed as
 ``extractor_aborted`` without calling the LLM.
 
 ``strict`` is the evaluation mode. There, a transient failure says nothing
 about the extractor's quality, so scoring it would understate recall: the
-first transient chunk failure (after its retry) and any abort raise
+first transient chunk failure (after its retry) and any abort (a
+permanent-HTTP streak included: it says the setup is broken) raise
 ``ExtractorAborted`` instead of being recorded. Permanent failures are the
 extractor's own and are scored in both modes.
 
@@ -58,7 +65,23 @@ from typing import Any
 from verimend.claims import CLAIM_TYPES, SUBJECT_ADAPTERS, SubjectError, parse_subject
 from verimend.collector.facts import canonical_json
 from verimend.extractor.chunking import Chunk, chunk_document, chunk_hash
-from verimend.extractor.client import LLMClient, LLMHTTPError, LLMTransportError
+from verimend.extractor.client import LLMClient
+from verimend.llm_policy import (  # noqa: F401 -- several are re-exported for callers and tests
+    ABORT_CONSECUTIVE,
+    ABORT_PERMANENT_HTTP,
+    ABORT_RETRY_AFTER,
+    CONSECUTIVE_TRANSIENT_LIMIT,
+    DEFAULT_WAIT_S,
+    ERROR_TRANSPORT,
+    ConfigStatus,
+    Permanent,
+    Streaks,
+    Transient,
+    Unwaitable,
+    count_permanent,
+    parse_retry_after,
+    request,
+)
 
 log = logging.getLogger(__name__)
 
@@ -67,20 +90,9 @@ log = logging.getLogger(__name__)
 OUTPUT_SCHEMA_VERSION = 1
 OUTPUT_KEYS = frozenset({"anchor_start", "anchor_end", "text", "claim_type", "subject"})
 
-CONSECUTIVE_TRANSIENT_LIMIT = 3
-DEFAULT_WAIT_S = 2.0
-
 ERROR_SCHEMA = "schema"
-ERROR_TRANSPORT = "transport"
 ERROR_OVERSIZED = "oversized_line"
 ERROR_ABORTED = "extractor_aborted"
-
-ABORT_CONSECUTIVE = "consecutive_transient_failures"
-ABORT_RETRY_AFTER = "retry_after_exceeds_max"
-
-_TRANSIENT_STATUSES = frozenset({408, 429})
-_RETRY_AFTER_STATUSES = frozenset({429, 503})
-_CONFIG_STATUSES = frozenset({401, 403})
 
 
 def load_prompt() -> str:
@@ -101,35 +113,16 @@ class ExtractorConfigError(Exception):
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
-        self.reason = reason  # lexora_url_unset | http_401 | http_403
+        self.reason = reason  # lexora_url_unset | http_401 | http_403 | http_404
 
 
 class ExtractorAborted(Exception):
-    """Evaluation mode only: a transient failure happened, so no score may be computed."""
+    """Evaluation mode only: a transient failure or an abort happened, so no score may be computed."""
 
     def __init__(self, reason: str, detail: dict[str, Any]) -> None:
         super().__init__(f"{reason}: {detail}")
         self.reason = reason
         self.detail = detail
-
-
-class _Transient(Exception):
-    def __init__(self, error: str) -> None:
-        super().__init__(error)
-        self.error = error
-
-
-class _Unwaitable(Exception):
-    def __init__(self, error: str, retry_after_s: int) -> None:
-        super().__init__(error)
-        self.error = error
-        self.retry_after_s = retry_after_s
-
-
-class _Permanent(Exception):
-    def __init__(self, error: str) -> None:
-        super().__init__(error)
-        self.error = error
 
 
 # ----------------------------------------------------------------- results
@@ -202,8 +195,12 @@ class ExtractionSession:
         self.strict = strict
         self.prompt = prompt if prompt is not None else load_prompt()
         self.extractor_key = extractor_key(self.prompt, tier)
-        self.consecutive_transient = 0
+        self.streaks = Streaks()
         self.aborted: dict[str, Any] | None = None
+
+    @property
+    def consecutive_transient(self) -> int:
+        return self.streaks.transient
 
     def close(self) -> None:
         """Release the client's resources (``LexoraClient``'s connection pool), if it holds any.
@@ -249,34 +246,38 @@ class ExtractionSession:
         at_chunk = {"doc_repo": document.repo, "doc_path": document.path, "lines": list(chunk.span)}
         try:
             claims = self._ask(document, chunk)
-        except _Unwaitable as exc:
+        except ConfigStatus as exc:
+            raise ExtractorConfigError(exc.error) from exc
+        except Unwaitable as exc:
             fail(exc.error)
-            self._abort(ABORT_RETRY_AFTER, {**at_chunk, "retry_after_s": exc.retry_after_s})
+            self._abort(ABORT_RETRY_AFTER, at_chunk, retry_after_s=exc.retry_after_s)
             return
-        except _Transient as exc:
+        except Transient as exc:
             fail(exc.error)
-            self.consecutive_transient += 1
+            self.streaks.transient += 1
             log.warning("%s:%s lines %s-%s: transient failure %s (%d in a row)", document.repo, document.path,
-                        *chunk.span, exc.error, self.consecutive_transient)
+                        *chunk.span, exc.error, self.streaks.transient)
             if self.strict:
                 raise ExtractorAborted(exc.error, at_chunk) from exc
-            if self.consecutive_transient >= CONSECUTIVE_TRANSIENT_LIMIT:
+            if self.streaks.transient >= CONSECUTIVE_TRANSIENT_LIMIT:
                 self._abort(ABORT_CONSECUTIVE, at_chunk)
             return
-        except _Permanent as exc:
+        except Permanent as exc:
             log.error("%s:%s lines %s-%s: %s", document.repo, document.path, *chunk.span, exc.error)
             fail(exc.error)
+            if count_permanent(self.streaks, exc):
+                self._abort(ABORT_PERMANENT_HTTP, at_chunk, status=exc.status)
             return
-        self.consecutive_transient = 0
+        self.streaks.transient = 0
         result.claims.extend(claims)
 
-    def _abort(self, reason: str, detail: dict[str, Any]) -> None:
-        log.error("extraction aborted: %s at %s", reason, detail)
+    def _abort(self, reason: str, at_chunk: dict[str, Any], **extra: Any) -> None:
+        """Stop the stage: ``{reason, at_chunk[, retry_after_s][, status]}``. Raises in strict mode."""
+        detail = {"reason": reason, "at_chunk": at_chunk, **{k: v for k, v in extra.items() if v is not None}}
+        log.error("extraction aborted: %s", detail)
         if self.strict:
             raise ExtractorAborted(reason, detail)
-        self.aborted = {"reason": reason, "at_chunk": {k: v for k, v in detail.items() if k != "retry_after_s"}}
-        if "retry_after_s" in detail:
-            self.aborted["retry_after_s"] = detail["retry_after_s"]
+        self.aborted = detail
 
     def _ask(self, document: Document, chunk: Chunk) -> list[ExtractedClaim]:
         messages = [
@@ -295,7 +296,7 @@ class ExtractionSession:
             if outcome.frame_errors:
                 log.error("%s:%s lines %s-%s: output still malformed after a retry: %s", document.repo,
                           document.path, *chunk.span, "; ".join(outcome.frame_errors[:5]))
-                raise _Permanent(ERROR_SCHEMA)
+                raise Permanent(ERROR_SCHEMA)
             for error in outcome.subject_errors:
                 log.warning("%s:%s lines %s-%s: keeping a claim with an invalid subject: %s", document.repo,
                             document.path, *chunk.span, error)
@@ -306,39 +307,11 @@ class ExtractionSession:
         ]
 
     def _request(self, messages: list[dict[str, str]]):
-        """One logical request: a transient failure is retried once, then raised as ``_Transient``."""
-        for attempt in (1, 2):
-            try:
-                return self.client.complete(messages, self.tier)
-            except LLMTransportError:
-                error, wait = ERROR_TRANSPORT, DEFAULT_WAIT_S
-            except LLMHTTPError as exc:
-                error = f"http_{exc.status}"
-                if exc.status in _CONFIG_STATUSES:
-                    raise ExtractorConfigError(error) from exc
-                if not (exc.status in _TRANSIENT_STATUSES or exc.status >= 500):
-                    if 400 <= exc.status < 500:
-                        raise _Permanent(error) from exc
-                    raise _Transient(error) from exc  # 1xx/3xx surfacing as an error: not ours to judge
-                wait = DEFAULT_WAIT_S
-                if exc.status in _RETRY_AFTER_STATUSES:
-                    seconds = parse_retry_after(exc.retry_after)
-                    if seconds is not None:
-                        if seconds > self.retry_after_max_s:
-                            raise _Unwaitable(error, seconds) from exc
-                        wait = float(seconds)
-            if attempt == 2:
-                raise _Transient(error)
-            self.sleep(wait)
-        raise AssertionError("unreachable")
-
-
-def parse_retry_after(value: str | None) -> int | None:
-    """Integer seconds (>= 0) or None. HTTP-date and anything else is None (wait the default)."""
-    if value is None:
-        return None
-    value = value.strip()
-    return int(value) if value.isascii() and value.isdigit() else None
+        """One logical request under ``verimend.llm_policy`` (retry once on a transient failure)."""
+        return request(
+            self.client, messages, self.tier,
+            retry_after_max_s=self.retry_after_max_s, sleep=self.sleep, streaks=self.streaks,
+        )
 
 
 # -------------------------------------------------------------- validation

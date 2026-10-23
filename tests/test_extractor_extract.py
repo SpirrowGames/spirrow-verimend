@@ -133,13 +133,59 @@ def test_oversized_line_fails_without_calling_the_llm() -> None:
 
 
 @pytest.mark.parametrize("status", [400, 413, 422])
-def test_permanent_4xx_is_not_retried_and_not_counted(status: int) -> None:
-    client = FakeClient(http(status), http(status), http(status), "[]")
+def test_permanent_4xx_is_not_retried_and_not_counted_as_transient(status: int) -> None:
+    client = FakeClient(http(status), http(status), "[]", http(status))
     s, sleeps = session(client)
     result = s.extract(FOUR)
     assert [f.error for f in result.failures] == [f"http_{status}"] * 3
-    assert len(client.calls) == 4  # one call per chunk, no retry, no abort
-    assert s.aborted is None and sleeps == []
+    assert len(client.calls) == 4  # one call per chunk, no retry
+    assert s.aborted is None and sleeps == [] and s.consecutive_transient == 0
+
+
+@pytest.mark.parametrize("status", [400, 413, 422])
+def test_three_permanent_4xx_in_a_row_abort_the_stage(status: int) -> None:
+    client = FakeClient(http(status), http(status), http(status))
+    s, _ = session(client)
+    result = s.extract(FOUR)
+    assert [f.error for f in result.failures] == [f"http_{status}"] * 3 + ["extractor_aborted"]
+    assert len(client.calls) == 3  # chunk 4 is never sent
+    assert s.aborted == {
+        "reason": "permanent_http_streak",
+        "at_chunk": {"doc_repo": "o/r", "doc_path": "README.md", "lines": [5, 6]},
+        "status": status,
+    }
+
+
+def test_a_successful_call_resets_the_permanent_http_streak() -> None:
+    client = FakeClient(http(400), "[]", http(400), http(400))
+    s, _ = session(client)
+    result = s.extract(FOUR)
+    assert [f.error for f in result.failures] == ["http_400"] * 3
+    assert s.aborted is None and len(client.calls) == 4
+
+
+def test_a_transient_failure_does_not_reset_the_permanent_http_streak() -> None:
+    client = FakeClient(http(400), http(400), http(503), http(503), http(400))
+    s, _ = session(client)
+    s.extract(FOUR)
+    assert s.aborted is not None and s.aborted["reason"] == "permanent_http_streak"
+    assert len(client.calls) == 5
+
+
+def test_schema_failures_are_not_counted_in_the_permanent_http_streak() -> None:
+    # chunk 1: 400; chunks 2-3: malformed twice (schema); chunk 4: 400 -> streak never reaches 3
+    client = FakeClient(http(400), "x", "y", "x", "y", http(400))
+    s, _ = session(client)
+    result = s.extract(FOUR)
+    assert [f.error for f in result.failures] == ["http_400", "schema", "schema", "http_400"]
+    assert s.aborted is None
+
+
+def test_strict_raises_on_a_permanent_http_streak() -> None:
+    s, _ = session(FakeClient(http(400), http(400), http(400)), strict=True)
+    with pytest.raises(ExtractorAborted) as info:
+        s.extract(FOUR)
+    assert info.value.reason == "permanent_http_streak"
 
 
 # ------------------------------------------------ transient HTTP errors
@@ -244,8 +290,8 @@ def test_parse_retry_after_accepts_non_negative_integer_seconds_only() -> None:
 # ---------------------------------------------------- configuration errors
 
 
-@pytest.mark.parametrize("status", [401, 403])
-def test_401_and_403_raise_a_configuration_error_without_retry(status: int) -> None:
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_401_403_404_raise_a_configuration_error_without_retry(status: int) -> None:
     client = FakeClient(http(status))
     s, sleeps = session(client)
     with pytest.raises(ExtractorConfigError) as info:

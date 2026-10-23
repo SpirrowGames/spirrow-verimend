@@ -1,0 +1,36 @@
+{
+  "case": "trap-04-negated-historical",
+  "tier": "light",
+  "recorded_from": "Lexora light tier, 2026-10-23",
+  "responses": [
+    {
+      "lines": [
+        1,
+        7
+      ],
+      "attempt": 0,
+      "model": "Qwen3.8-27B",
+      "content": "[\n  {\n    \"anchor_start\": 3,\n    \"anchor_end\": 3,\n    \"text\": \"The MCP server used to listen on port 8117.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"historical\",\n      \"port\": 8117,\n      \"service\": \"MCP server\"\n    }\n  },\n  {\n    \"anchor_start\": 4,\n    \"anchor_end\": 4,\n    \"text\": \"The MCP server now listens on port 8114.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"current\",\n      \"port\": 8114,\n      \"service\": \"MCP server\"\n    }\n  },\n  {\n    \"anchor_start\": 5,\n    \"anchor_end\": 5,\n    \"text\": \"Clients should not point at port 8000.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"negated\",\n      \"port\": 8000,\n      \"service\": \"GPU metrics exporter\"\n    }\n  },\n  {\n    \"anchor_start\": 5,\n    \"anchor_end\": 5,\n    \"text\": \"Port 8000 is the GPU metrics exporter.\",\n    \"claim_type\": \"port\",\n    \"subject\": {\n      \"polarity\": \"current\",\n      \"port\": 8000,\n      \"service\": \"GPU metrics exporter\"\n    }\n  },\n  {\n    \"anchor_start\": 6,\n    \"anchor_end\": 6,\n    \"text\": \"The chatroom_post_message tool no longer accepts the thread_title parameter.\",\n    \"claim_type\": \"parameter\",\n    \"subject\": {\n      \"polarity\": \"negated\",\n      \"tool\": \"chatroom_post_message\",\n      \"param\": \"thread_title\"\n    }\n  },\n  {\n    \"anchor_start\": 7,\n    \"anchor_end\": 7,\n    \"text\": \"The magickit-server command was removed.\",\n    \"claim_type\": \"command\",\n    \"subject\": {\n      \"polarity\": \"negated\",\n      \"command\": \"magickit-server\"\n    }\n  }\n]"
+    }
+  ],
+  "judge_responses": [
+    {
+      "claim": "The MCP server used to listen on port 8117.",
+      "attempt": 0,
+      "model": "Qwen3.8-27B",
+      "content": "{\n  \"result\": \"verified\",\n  \"fact_ids\": [1],\n  \"reason\": \"Fact 1 shows the environment variable MAGICKIT_MCP_PORT is set to 8117, confirming the MCP server listens on that port.\"\n}"
+    },
+    {
+      "claim": "Clients should not point at port 8000.",
+      "attempt": 0,
+      "model": "Qwen3.8-27B",
+      "content": "{\n  \"result\": \"unverifiable\",\n  \"fact_ids\": [\n    3\n  ],\n  \"reason\": \"The fact shows port 8000 is used for gpu_metrics_url, but does not confirm or contradict the specific instruction that clients should not point at it.\"\n}"
+    },
+    {
+      "claim": "The chatroom_post_message tool no longer accepts the thread_title parameter.",
+      "attempt": 0,
+      "model": "Qwen3.8-27B",
+      "content": "{\n  \"result\": \"verified\",\n  \"fact_ids\": [4],\n  \"reason\": \"The tool schema for chatroom_post_message lists all accepted parameters and does not include thread_title, confirming it is no longer accepted.\"\n}"
+    }
+  ]
+}

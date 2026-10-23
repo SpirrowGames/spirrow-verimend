@@ -69,6 +69,9 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
   - `port`: `{port: int(1-65535), service: str|null}` / `parameter`: `{tool, param}` または `{env}` / `command`: `{command}`
   - 他の claim_type の subject モデルは、それを照合するチェッカーと同じ PR で追加する
 - `verdict.claim_id` は UNIQUE（1 クレーム 1 判定）。claim / verdict は `crawl_run` の削除に CASCADE で追従する
+- `verdict.method` と `evidence_json` の形:
+  - `deterministic`（M2a）: `{"checker","fact_ids","reason"[,"match"]}`。subject のスキーマ違反は `{"checker","error":"subject_schema_violation","detail"}`
+  - `llm`（M2c）: `{"judge":"llm","tier","fact_ids","reason"[,"downgraded":true]}`。候補ファクトが 0 件で LLM を呼ばなかったものは `{"judge":"llm","reason":"no_candidate_facts"}`（result は `unverifiable`）
 - ドキュメント単位の増分抽出は実装済み（M2b、migration 0003）:
   - `document(run_id, doc_repo, doc_path, content_hash, extractor_key, chunk_hash, status)`。`status` = `extracted` | `cached` | `failed`
   - `content_hash` = 文書本文の SHA-256。`extractor_key` = プロンプトファイル・ティア・出力スキーマ版の SHA-256。`chunk_hash` = 計算したチャンク境界の SHA-256（境界の規則を変えて境界が動けば、版番号を上げなくてもキャッシュが外れる）
@@ -114,15 +117,17 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 
 | 区分 | 該当 | 扱い | 本番の run | 評価（`run_e2e`） |
 |---|---|---|---|---|
-| 設定の誤り | `lexora_url` 未設定（チャンクを作る前に検査）、401、403 | `ExtractorConfigError`、再試行しない | run を `failed`、`stats_json.extract.config_error`（`lexora_url_unset` / `http_401` / `http_403`）、reconcile しない、0 以外で終了、保存済みのファクトは残す | 例外を伝え、点数は出さない |
+| 設定の誤り | `lexora_url` 未設定（チャンクを作る前に検査）、401、403、404（OpenAI 互換 API で 404 はエンドポイントかモデル＝ティアが無いとき。要求の中身では直らない） | `ExtractorConfigError`、再試行しない | run を `failed`、`stats_json.extract.config_error`（`lexora_url_unset` / `http_401` / `http_403` / `http_404`）、reconcile しない、0 以外で終了、保存済みのファクトは残す | 例外を伝え、点数は出さない |
 | 一時的 | timeout、接続エラー、5xx、429、408 | 1 回だけ再試行。429 / 503 の `Retry-After`（0 以上の整数の秒数のみ）が上限以下ならその秒数、それ以外（ヘッダ無し、HTTP-date、読めない値、他の status）は 2 秒待つ | 再試行も失敗したらチャンク失敗（`http_<status>` / `transport`）。チャンクをまたいで連続 3 回で打ち切り（`consecutive_transient_failures`）。成功したチャンクで数は 0 に戻る | 1 件でも失敗したら `ExtractorAborted` |
 | 一時的・待てない | 429 / 503 で `Retry-After` > `lexora_retry_after_max_s` | 再試行しない | その場で打ち切り（`retry_after_exceeds_max`）。次のチャンクは送らない | `ExtractorAborted` |
-| 恒久的 | 上記以外の 4xx（400、413、422 など）、`oversized_line`、`schema` | 再試行しない（`schema` は上の出力の再試行のみ）。連続失敗の数に入れない | チャンク失敗、run は `partial` | 点数に反映する（抽出器の品質） |
+| 恒久的 | 上記以外の 4xx（400、413、422 など）、`oversized_line`、`schema` | 再試行しない（`schema` は上の出力の再試行のみ）。一時的な失敗の連続数に入れない | チャンク失敗、run は `partial` | 点数に反映する（抽出器の品質） |
+| 恒久的・HTTP の連続 | 恒久的な 4xx がチャンクをまたいで連続 3 回（知らないティアに 400 が返る場合など）。数は Lexora の呼び出しが 1 回成功したときだけ 0 に戻る（一時的な失敗が挟まっても戻らない）。`schema` / `oversized_line` は数えない。一時的な失敗の連続数とは別に数える | — | 3 回目でその場で打ち切り（`permanent_http_streak`、`status` 付き）。正しい設定で 4xx が 3 回続くのは要求の組み立てか設定が壊れている合図 | `ExtractorAborted`（設定の誤りを点数に混ぜない）。1 回だけの恒久的な失敗は従来どおり点数に反映 |
 
-- 打ち切り: 残りのチャンク（以降の文書を含む）は Lexora を呼ばずに `extractor_aborted` のチャンク失敗。`stats_json.extract.aborted` = `{reason, at_chunk: {doc_repo, doc_path, lines}[, retry_after_s]}`。run は `partial` で、抽出できた分は reconcile する。打ち切られた文書は `failed` なので次の run で抽出し直される
+- HTTP の分類と再試行は `verimend/llm_policy.py` にあり、reconciler の LLM 判定（5.3）と共有する
+- 打ち切り: 残りのチャンク（以降の文書を含む）は Lexora を呼ばずに `extractor_aborted` のチャンク失敗。`stats_json.extract.aborted` = `{reason, at_chunk: {doc_repo, doc_path, lines}[, retry_after_s][, status]}`（`reason` = `consecutive_transient_failures` / `retry_after_exceeds_max` / `permanent_http_streak`）。run は `partial` で、抽出できた分は reconcile する。打ち切られた文書は `failed` なので次の run で抽出し直される
 - チャンク失敗は `stats_json.extract.failed_chunks` に `{doc_repo, doc_path, lines, error}` で記録する。`error` は `schema` / `http_<status>` / `transport` / `oversized_line` / `extractor_aborted`。偽の claim 行は入れない
-- `partial` と `failed` の境界: `failed` は環境が壊れている（設定の誤り）か想定外の例外。`partial` は一時的な停止・打ち切り・チャンク単位の失敗（collector の失敗と同じ封じ込め）。どちらも 0 以外で終了する
-- 評価: `python -m verimend.eval`（要 `VERIMEND_LEXORA_URL`）が golden set の各ケースを `run_e2e` に通し、deterministic 層で採点する。CI では閾値ゲートを入れない（テストは録画済みの応答で 1 ケースを通す）
+- `partial` と `failed` の境界: `failed` は **抽出の段の** 設定の誤りか想定外の例外だけ。`partial` は一時的な停止・打ち切り・チャンク単位の失敗（collector の失敗と同じ封じ込め）と、reconciler の LLM 判定の段の失敗すべて（設定の誤りを含む。5.3）。どちらも 0 以外で終了する
+- 評価: `python -m verimend.eval`（要 `VERIMEND_LEXORA_URL`）が golden set の各ケースを `run_e2e` に通し、deterministic 層と final 層（LLM 判定込み）で採点する。golden set が 0 件なら `no golden cases under <root>` を出して 0 以外で終了する。CI では閾値ゲートを入れない（テストは録画済みの応答でケースを通す）
 
 ### 5.3 reconciler
 - 照合順序: 決定的チェッカー（link/version/command/parameter/port/path）→ 該当しないタイプのみ LLM 判定
@@ -140,6 +145,21 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
   - `mcp_schema` の content に `open_parameters`（`*args` / `**kwargs` があれば true、関数を解決できなければ null）を追加。これが無いと閉じたシグネチャと任意の名前を受け取るシグネチャが区別できない
 - LLM 判定の入力: クレーム＋検索（BM25。v1 は rank-bm25 で十分、必要になったら Prismind の BGE-M3 を併用）で絞った上位ファクト最大5件
 - 出力: result + 根拠ファクトID + 短い理由。根拠ファクトの提示がない stale 判定は unverifiable に降格（幻覚ガード）
+- 実装メモ（M2c: `verimend/reconciler/llm.py`、トークン化は `verimend/reconciler/tokenize.py`、プロンプトは `verimend/reconciler/prompt.md`）:
+  - 対象は決定的段の後も verdict の無いクレーム（`deferred`）だけ。`invalid_subject` と決定的段で判定済みのクレームは回らない
+  - 検索: 同じ run・同じリポジトリのファクト（決定的段と同じ絞り込み）を rank-bm25 で順位付けし、スコアが 0 より大きい上位 5 件を候補にする。クエリはクレーム本文と subject の文字列値。ファクト側は content の値（文字列と数値）だけを索引し、キーは入れない。idf は負にならない式 `log(1 + (N - n + 0.5) / (n + 0.5))` に差し替える（rank-bm25 既定の idf はファクトが 1〜2 件だと一致したファクトでもスコアが負になる）。候補が 0 件なら LLM を呼ばず `unverifiable` / `llm`（evidence `{"judge":"llm","reason":"no_candidate_facts"}`）
+  - トークン化（決定的、形態素解析器なし）: NFKC で正規化 → 英数字と `_` `-` `.` `/` の連なりを小文字 1 トークン（前後の `.` `-` `/` は落とす。文末の `.` で `8113.` にならないように）→ ひらがな・カタカナ（長音符・半角カナを含む）・漢字（統合漢字と拡張 A）の連なりは文字 2-gram（1 文字だけならその 1 文字）→ それ以外は区切り。クエリとファクトに同じ関数を使う
+  - LLM の入力: クレーム本文、`doc_path` と anchor の行、候補（`fact_id`、kind、content の JSON を 1 件 1500 文字で切る）。出力は `{result, fact_ids, reason}`（`reason` は 300 文字で切る）。外枠の違反（JSON でない、キーの過不足、未知の `result`、型違い）は違反の要約を添えて 1 回だけ再試行し、それでも失敗したら verdict を書かずに `deferred` のまま残す（`llm_failed` に `{claim_id, error:"schema"}`）
+  - 幻覚ガード: 提示していない `fact_ids` は捨てる。捨てた後で `fact_ids` が空の `stale` **と `verified`** は `unverifiable` に降格し、`evidence.downgraded = true`。根拠の無い判定はどちらの向きでも残さない
+  - Lexora の失敗は 5.2 と同じ区分（`verimend/llm_policy.py`）で、単位はクレーム。**この段の失敗はどの区分でも run を `partial` にする（`failed` にはしない）**。抽出は成功しているので、`failed` にすると次の run でキャッシュが使えず全文書を抽出し直すことになる
+    - 設定の誤り（401 / 403 / 404）: その場で段を止め、残りのクレームは呼ばずに `deferred`。`stats_json.reconcile.llm_config_error = {status, at_claim}`、`log.error`。決定的段の verdict と、それまでの LLM の verdict は残す
+    - 一時的: 1 回だけ再試行し、失敗したらクレーム失敗（`deferred` のまま、`llm_failed`）。クレームをまたいで連続 3 回で打ち切り（`consecutive_transient_failures`）
+    - 一時的・待てない: その場で打ち切り（`retry_after_exceeds_max`）
+    - 恒久的な 4xx: クレーム失敗。連続 3 回で打ち切り（`permanent_http_streak`、数え方は 5.2 と同じ）
+    - 打ち切り後は残りのクレームを呼ばずに `deferred` のまま残す。`stats_json.reconcile.llm_aborted = {reason, at_claim[, retry_after_s][, status]}`（`at_claim` はクレーム id）
+  - verdict は 1 件ごとにコミットする。`stats_json.reconcile` に `llm_verified` / `llm_stale` / `llm_unverifiable` / `llm_downgraded`（`method = llm` の verdict から再計算）と、その回の `llm_failed`（`[{claim_id, error}]`）を足す
+  - 設定: `VERIMEND_RECONCILER_TIER`（既定 `light`、空文字は Settings の検証で弾く）。Lexora が知らないティア名は 404（設定の誤り）か 4xx の連続（打ち切り）で止まる
+  - 評価: `run_e2e` に strict な `JudgeSession` を渡すと final 層も採点する。設定の誤りは `JudgeConfigError`、一時的な失敗 1 件と打ち切りは `JudgeAborted` で、どちらも点数を出さない。1 回だけの恒久的な失敗（4xx、`schema`）はクレームが verdict 無しのまま final 層で誤りとして数えられる
 
 ### 5.4 mender
 - stale のみパッチ草案を生成。アンカー範囲外の変更は生成しても棄却（diff の暴走防止）
@@ -155,6 +175,7 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 - ステージ別ティア割当（config で変更可）:
   - extractor: **Light**（高頻度・定型抽出）
   - reconciler: **Light**、根拠が拮抗する場合のみ **Heavy** で再判定
+    - M2c では Heavy での再判定は未実装（Light のみ、`VERIMEND_RECONCILER_TIER`）。「拮抗」を決定的に定める材料がまだ無いので、Light での final 層の誤判定を見てから条件を決める
   - mender（パッチ草案）: **Heavy**（件数少・品質優先）
 - vLLM の直接運用・スロット管理は Verimend の関心事から除外（Lexora の責務）
 

@@ -13,6 +13,7 @@ from verimend import __main__ as cli
 from verimend import pipeline as pipeline_module
 from verimend.db import connection, migrate
 from verimend.extractor import ExtractorConfigError
+from verimend.reconciler import JudgeSession
 from verimend.pipeline import doc_paths, run_pipeline
 from verimend.targets import parse_targets
 
@@ -65,9 +66,9 @@ def _port_on_line_3(start: int) -> str:
     return claims(port_claim(3, 8120)) if start == 1 else "[]"
 
 
-def _run(db, source, make_session):
+def _run(db, source, make_session, make_judge=None):
     with connection(db) as conn:
-        result = run_pipeline(conn, _targets(), _checkout(source), make_session)
+        result = run_pipeline(conn, _targets(), _checkout(source), make_session, make_judge=make_judge)
         row = conn.execute("SELECT status, stats_json FROM crawl_run WHERE id = ?", (result.run_id,)).fetchone()
         claim_count = conn.execute("SELECT count(*) FROM claim WHERE run_id = ?", (result.run_id,)).fetchone()[0]
         verdicts = conn.execute(
@@ -179,6 +180,88 @@ def test_the_second_run_uses_the_cache(db, source) -> None:
     assert stats["extract"]["cached"] == 3 and n_claims == 3 and verdicts == ["verified"] * 3
 
 
+# ------------------------------------------------------- the LLM stage
+
+
+def _historical_on_line_3(start: int) -> str:
+    """A claim the checkers defer (historical), so it reaches the LLM judge."""
+    return claims(port_claim(3, 8120, polarity="historical")) if start == 1 else "[]"
+
+
+def _judge(client) -> JudgeSession:
+    return JudgeSession(client, prompt="judge prompt", sleep=lambda s: None)
+
+
+def _unverifiable() -> str:
+    return json.dumps({"result": "unverifiable", "fact_ids": [], "reason": "no evidence either way"})
+
+
+def test_the_llm_stage_judges_the_claims_the_checkers_deferred(db, source) -> None:
+    judge_client = FakeClient(*[_unverifiable()] * 3)
+    _, status, stats, n_claims, verdicts, _ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0], lambda: _judge(judge_client)
+    )
+    assert status == "succeeded"
+    assert len(judge_client.calls) == 3 and verdicts == ["unverifiable"] * 3
+    assert stats["reconcile"]["llm_unverifiable"] == 3 and stats["reconcile"]["deferred"] == 0
+    assert stats["reconcile"]["llm_failed"] == []
+
+
+def test_a_claim_failure_in_the_llm_stage_makes_the_run_partial(db, source) -> None:
+    judge_client = FakeClient("x", "y", _unverifiable(), _unverifiable())
+    _, status, stats, *_ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0], lambda: _judge(judge_client)
+    )
+    assert status == "partial"
+    assert [f["error"] for f in stats["reconcile"]["llm_failed"]] == ["schema"]
+
+
+@pytest.mark.parametrize("status_code", [401, 404])
+def test_a_reconciler_config_error_makes_the_run_partial_and_keeps_the_extraction_cache(
+    db, source, status_code
+) -> None:
+    judge_client = FakeClient(http(status_code))
+    result, status, stats, n_claims, verdicts, _ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0], lambda: _judge(judge_client)
+    )
+    assert status == "partial" and result.status == "partial"
+    assert stats["reconcile"]["llm_config_error"]["status"] == status_code
+    assert len(judge_client.calls) == 1  # the other claims are not sent
+    assert n_claims == 3 and verdicts == [] and stats["reconcile"]["deferred"] == 3
+
+    # The run is partial, not failed, so its extraction is a cache source for the next run.
+    extract_client = FakeClient()
+    _, status2, stats2, *_ = _run(
+        db, source, lambda: session(extract_client)[0], lambda: _judge(FakeClient(*[_unverifiable()] * 3))
+    )
+    assert extract_client.calls == [] and stats2["extract"]["cached"] == 3 and status2 == "succeeded"
+
+
+def test_an_extraction_404_fails_the_run_and_never_builds_the_judge(db, source) -> None:
+    built = []
+    _, status, stats, *_ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=lambda s: http(404)))[0], lambda: built.append(1)
+    )
+    assert status == "failed" and stats["extract"]["config_error"] == "http_404" and built == []
+
+
+def test_three_400s_in_the_llm_stage_abort_it(db, source) -> None:
+    judge_client = FakeClient(http(400), http(400), http(400))
+    _, status, stats, *_ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0], lambda: _judge(judge_client)
+    )
+    assert status == "partial"
+    assert stats["reconcile"]["llm_aborted"]["reason"] == "permanent_http_streak"
+    assert stats["reconcile"]["llm_aborted"]["status"] == 400
+
+
+def test_three_400s_in_the_extraction_stage_abort_it(db, source) -> None:
+    _, status, stats, *_ = _run(db, source, lambda: session(FakeClient(by_chunk=lambda s: http(400)))[0])
+    assert status == "partial"
+    assert stats["extract"]["aborted"]["reason"] == "permanent_http_streak"
+    assert stats["extract"]["aborted"]["status"] == 400
+
+
 # ------------------------------------------------------------------ CLI
 
 
@@ -196,6 +279,22 @@ def test_cli_run_without_lexora_url_exits_non_zero_and_fails_the_run(tmp_path, s
     assert "failed" in capsys.readouterr().out
     with connection(tmp_path / "cli.sqlite3") as conn:
         assert conn.execute("SELECT status FROM crawl_run").fetchone()[0] == "failed"
+
+
+def test_cli_run_exits_1_on_a_reconciler_config_error(tmp_path, source, monkeypatch, capsys) -> None:
+    targets = tmp_path / "targets.yaml"
+    targets.write_text(
+        "version: 1\ntargets:\n  - repo: o/demo\n    doc_globs: [README.md]\n    extractors: {ports: true}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VERIMEND_DB_PATH", str(tmp_path / "cli.sqlite3"))
+    monkeypatch.setenv("VERIMEND_TARGETS_PATH", str(targets))
+    monkeypatch.setattr(cli, "github_checkout", lambda *a: _checkout(source))
+    extract_client = FakeClient(by_chunk=_historical_on_line_3)
+    monkeypatch.setattr(cli, "session_from_settings", lambda s: session(extract_client)[0])
+    monkeypatch.setattr(cli, "judge_from_settings", lambda s: _judge(FakeClient(http(401))))
+    assert cli.main(["run"]) == 1
+    assert "partial" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- globs

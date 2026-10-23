@@ -1,4 +1,4 @@
-"""One full run: collect -> extract -> reconcile, on one ``crawl_run`` (docs/design.md 2).
+"""One full run: collect -> extract -> reconcile (deterministic, then LLM), on one ``crawl_run`` (design 2).
 
 The documents are read from the same checkout the facts are collected from
 (``collect_targets``' ``doc_sink``), so a claim and the facts it is compared to
@@ -9,10 +9,15 @@ How the run ends (design 5.2):
 - the collector's own failures are contained as before (``partial``);
 - a chunk failure or an abort of the extraction stage makes the run
   ``partial``; the claims that were extracted are reconciled;
-- an ``ExtractorConfigError`` (no ``lexora_url``, HTTP 401 / 403) makes it
-  ``failed``, with ``stats.extract.config_error``. The reconciler does not run
-  and the facts already stored stay. A failed run is never an extraction cache
-  source.
+- an ``ExtractorConfigError`` (no ``lexora_url``, HTTP 401 / 403 / 404) makes
+  it ``failed``, with ``stats.extract.config_error``. The reconciler does not
+  run and the facts already stored stay. A failed run is never an extraction
+  cache source.
+- every failure of the reconciler's LLM stage -- a claim failure, an abort,
+  even a configuration error (401 / 403 / 404) -- makes the run ``partial``,
+  never ``failed``: extraction succeeded before it, and failing the run would
+  stop it being a cache source (``verimend.reconciler.llm``). The claims it
+  could not judge stay ``deferred``; the verdicts written stay.
 - any other error marks the run ``failed`` and propagates.
 """
 
@@ -41,7 +46,7 @@ from verimend.collector.run import (
 )
 from verimend.collector.tree import RepoTree
 from verimend.extractor import Document, ExtractionSession, ExtractorConfigError, extract_documents
-from verimend.reconciler import reconcile
+from verimend.reconciler import JudgeConfigError, JudgeSession, judge_deferred, llm_stage_failed, reconcile
 from verimend.targets import Target
 
 log = logging.getLogger(__name__)
@@ -60,11 +65,14 @@ def run_pipeline(
     checkout: Checkout,
     make_session: Callable[[], ExtractionSession],
     health_source: HealthSource | None = None,
+    make_judge: Callable[[], JudgeSession] | None = None,
 ) -> PipelineResult:
     """Run every stage into one new crawl_run and return how it ended.
 
     ``make_session`` is called once, after collection and before any chunk is
     built; it raises ``ExtractorConfigError`` when Lexora is not configured.
+    ``make_judge`` is called once, after the deterministic stage; without it
+    the LLM stage does not run and undecided claims stay ``deferred``.
     """
     run_id = start_run(conn)
     stats: dict[str, Any] = {"targets": {}}
@@ -94,14 +102,34 @@ def run_pipeline(
         status = STATUS_PARTIAL if failed or has_errors(stats) else STATUS_SUCCEEDED
         conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))
         reconcile(conn, run_id)
+        if make_judge is not None:
+            _judge(conn, run_id, make_judge)
         (stats_json,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
         stats = json.loads(stats_json)
+        if llm_stage_failed(stats.get("reconcile", {})):
+            status = STATUS_PARTIAL
     except BaseException:
         conn.rollback()
         finish_run(conn, run_id, STATUS_FAILED, stats)
         raise
     finish_run(conn, run_id, status, stats)
     return PipelineResult(run_id, status, stats)
+
+
+def _judge(conn: sqlite3.Connection, run_id: int, make_judge: Callable[[], JudgeSession]) -> None:
+    """The LLM stage. A judge that cannot even be built is recorded like a configuration error."""
+    try:
+        judge = make_judge()
+    except JudgeConfigError as exc:
+        log.error("LLM judge: configuration error %s; deferred claims stay deferred", exc.reason)
+        (stats_json,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
+        stats = json.loads(stats_json) if stats_json else {}
+        stats.setdefault("reconcile", {})["llm_config_error"] = {"reason": exc.reason}
+        conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))
+        conn.commit()
+        return
+    with judge:
+        judge_deferred(conn, run_id, judge)
 
 
 def doc_paths(tree: RepoTree, globs: Sequence[str]) -> list[str]:
