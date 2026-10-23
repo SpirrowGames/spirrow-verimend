@@ -365,3 +365,44 @@ def test_lexora_client_reports_transport_errors() -> None:
 
 def test_lexora_client_returns_no_text_for_a_non_completion_body() -> None:
     assert _lexora(lambda r: httpx.Response(200, json={"oops": 1})).complete([], "light").text is None
+
+
+# ----------------------------------- abort detail shape and cause (msg-176 / msg-178)
+
+
+def test_strict_transient_abort_detail_has_the_abort_shape_and_chains_the_cause() -> None:
+    second = http(503)
+    s, _ = session(FakeClient(http(503), second), strict=True)
+    with pytest.raises(ExtractorAborted) as info:
+        s.extract(ONE)
+    detail = info.value.detail
+    assert detail == {"reason": "http_503", "at_chunk": {"doc_repo": "o/r", "doc_path": "README.md", "lines": [1, 2]}}
+    # explicit chaining: the session's Transient, itself raised from the client's error
+    assert info.value.__cause__ is not None and info.value.__cause__.__cause__ is second
+    assert "cause" not in detail
+    json.dumps(detail)
+
+
+def test_strict_permanent_streak_abort_has_the_same_keys_and_chains_the_third_failure() -> None:
+    third = http(400)
+    s, _ = session(FakeClient(http(400), http(400), third), strict=True)
+    with pytest.raises(ExtractorAborted) as info:
+        s.extract(FOUR)
+    detail = info.value.detail
+    assert set(detail) == {"reason", "at_chunk", "status"}
+    assert set(detail["at_chunk"]) == {"doc_repo", "doc_path", "lines"} and detail["at_chunk"]["lines"] == [5, 6]
+    assert info.value.__cause__.__cause__ is third
+    assert "cause" not in detail
+    json.dumps(detail)
+
+
+def test_an_abort_without_a_cause_keeps_the_implicit_context() -> None:
+    s, _ = session(FakeClient(), strict=True)
+    marker = RuntimeError("outer")
+    with pytest.raises(ExtractorAborted) as info:
+        try:
+            raise marker
+        except RuntimeError:
+            s._abort("consecutive_transient", {"doc_repo": "o/r", "doc_path": "d.md", "lines": [1, 2]})
+    assert info.value.__cause__ is None and info.value.__context__ is marker
+    assert info.value.__suppress_context__ is False

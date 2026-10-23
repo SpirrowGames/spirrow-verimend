@@ -358,3 +358,37 @@ def test_the_judge_prompt_ships_with_the_package() -> None:
 
     prompt = load_prompt()
     assert "fact_ids" in prompt and "unverifiable" in prompt
+
+
+# ----------------------------------- abort detail shape and cause (msg-176 / msg-178)
+
+
+def test_strict_transient_abort_detail_has_the_abort_shape_and_chains_the_cause(conn) -> None:
+    run, fact, claims = _setup(conn, 2)
+    second = http(503)
+    with pytest.raises(JudgeAborted) as info:
+        _both_stages(conn, run, _judge(FakeClient(http(503), second), strict=True))
+    detail = info.value.detail
+    assert set(detail) == {"reason", "at_claim"} and detail["reason"] == "http_503"
+    assert detail["at_claim"] in claims
+    assert info.value.__cause__ is not None and info.value.__cause__.__cause__ is second
+    assert "cause" not in detail
+    json.dumps(detail)
+
+
+def test_strict_permanent_streak_abort_has_the_same_keys_and_chains_the_third_failure(conn) -> None:
+    run, fact, claims = _setup(conn, 3)
+    third = http(400)
+    with pytest.raises(JudgeAborted) as info:
+        _both_stages(conn, run, _judge(FakeClient(http(400), http(400), third), strict=True))
+    detail = info.value.detail
+    assert set(detail) == {"reason", "at_claim", "status"} and detail["at_claim"] in claims
+    assert info.value.__cause__.__cause__ is third
+    assert "cause" not in detail
+    json.dumps(detail)
+
+
+def test_a_non_strict_abort_record_carries_no_cause(conn) -> None:
+    run, fact, _ = _setup(conn, 3)
+    _both_stages(conn, run, _judge(FakeClient(http(400), http(400), http(400))))
+    assert set(_stats(conn, run)["llm_aborted"]) == {"reason", "at_claim", "status"}

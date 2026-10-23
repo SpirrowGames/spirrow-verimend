@@ -250,7 +250,7 @@ class ExtractionSession:
             raise ExtractorConfigError(exc.error) from exc
         except Unwaitable as exc:
             fail(exc.error)
-            self._abort(ABORT_RETRY_AFTER, at_chunk, retry_after_s=exc.retry_after_s)
+            self._abort(ABORT_RETRY_AFTER, at_chunk, retry_after_s=exc.retry_after_s, cause=exc)
             return
         except Transient as exc:
             fail(exc.error)
@@ -258,24 +258,32 @@ class ExtractionSession:
             log.warning("%s:%s lines %s-%s: transient failure %s (%d in a row)", document.repo, document.path,
                         *chunk.span, exc.error, self.streaks.transient)
             if self.strict:
-                raise ExtractorAborted(exc.error, at_chunk) from exc
+                self._abort(exc.error, at_chunk, cause=exc)
             if self.streaks.transient >= CONSECUTIVE_TRANSIENT_LIMIT:
-                self._abort(ABORT_CONSECUTIVE, at_chunk)
+                self._abort(ABORT_CONSECUTIVE, at_chunk, cause=exc)
             return
         except Permanent as exc:
             log.error("%s:%s lines %s-%s: %s", document.repo, document.path, *chunk.span, exc.error)
             fail(exc.error)
             if count_permanent(self.streaks, exc):
-                self._abort(ABORT_PERMANENT_HTTP, at_chunk, status=exc.status)
+                self._abort(ABORT_PERMANENT_HTTP, at_chunk, status=exc.status, cause=exc)
             return
         self.streaks.transient = 0
         result.claims.extend(claims)
 
-    def _abort(self, reason: str, at_chunk: dict[str, Any], **extra: Any) -> None:
-        """Stop the stage: ``{reason, at_chunk[, retry_after_s][, status]}``. Raises in strict mode."""
+    def _abort(
+        self, reason: str, at_chunk: dict[str, Any], *, cause: BaseException | None = None, **extra: Any
+    ) -> None:
+        """Stop the stage: ``{reason, at_chunk[, retry_after_s][, status]}``. Raises in strict mode.
+
+        ``cause`` becomes the raised exception's ``__cause__`` (``raise ... from cause``); it is never put
+        into ``detail``. With no cause the raise carries no ``from``, so an implicit ``__context__`` survives.
+        """
         detail = {"reason": reason, "at_chunk": at_chunk, **{k: v for k, v in extra.items() if v is not None}}
         log.error("extraction aborted: %s", detail)
         if self.strict:
+            if cause is not None:
+                raise ExtractorAborted(reason, detail) from cause
             raise ExtractorAborted(reason, detail)
         self.aborted = detail
 

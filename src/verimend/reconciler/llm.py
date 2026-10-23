@@ -213,28 +213,34 @@ class JudgeSession:
             self.config_error = {"status": exc.status, "at_claim": claim.id}
             return None
         except Unwaitable as exc:
-            self._abort(ABORT_RETRY_AFTER, claim.id, retry_after_s=exc.retry_after_s)
+            self._abort(ABORT_RETRY_AFTER, claim.id, retry_after_s=exc.retry_after_s, cause=exc)
             return None
         except Transient as exc:
             self.streaks.transient += 1
             log.warning("claim %s: transient failure %s (%d in a row)", claim.id, exc.error, self.streaks.transient)
             if self.strict:
-                raise JudgeAborted(exc.error, {"at_claim": claim.id}) from exc
+                self._abort(exc.error, claim.id, cause=exc)
             if self.streaks.transient >= CONSECUTIVE_TRANSIENT_LIMIT:
-                self._abort(ABORT_CONSECUTIVE, claim.id)
+                self._abort(ABORT_CONSECUTIVE, claim.id, cause=exc)
             return ClaimFailure(claim.id, exc.error)
         except Permanent as exc:
             log.error("claim %s: %s", claim.id, exc.error)
             if count_permanent(self.streaks, exc):
-                self._abort(ABORT_PERMANENT_HTTP, claim.id, status=exc.status)
+                self._abort(ABORT_PERMANENT_HTTP, claim.id, status=exc.status, cause=exc)
             return ClaimFailure(claim.id, exc.error)
         self.streaks.transient = 0
         return _guard(parsed, candidates, self.tier, claim.id)
 
-    def _abort(self, reason: str, at_claim: int, **extra: Any) -> None:
+    def _abort(self, reason: str, at_claim: int, *, cause: BaseException | None = None, **extra: Any) -> None:
+        """Stop the stage: ``{reason, at_claim[, retry_after_s][, status]}``. Raises in strict mode.
+
+        Same contract as the extractor's ``_abort``: ``cause`` is chained with ``from`` and never stored.
+        """
         detail = {"reason": reason, "at_claim": at_claim, **{k: v for k, v in extra.items() if v is not None}}
         log.error("LLM judge aborted: %s", detail)
         if self.strict:
+            if cause is not None:
+                raise JudgeAborted(reason, detail) from cause
             raise JudgeAborted(reason, detail)
         self.aborted = detail
 
