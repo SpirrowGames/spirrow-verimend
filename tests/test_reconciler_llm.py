@@ -14,7 +14,7 @@ from extractor_fakes import FakeClient, http, transport
 from verimend.collector.facts import canonical_json
 from verimend.db import connection, migrate
 from verimend.reconciler import JudgeAborted, JudgeConfigError, JudgeSession, judge_deferred, reconcile
-from verimend.reconciler.llm import FactDoc, query_tokens, search, validate_judgment
+from verimend.reconciler.llm import validate_judgment
 from verimend.settings import Settings
 
 REPO = "SpirrowGames/spirrow-magickit"
@@ -88,45 +88,6 @@ def _both_stages(conn, run, judge) -> dict:
 
 
 # ------------------------------------------------------------- retrieval
-
-
-def _docs(*contents: dict) -> list[FactDoc]:
-    return [FactDoc(i + 1, "file", c) for i, c in enumerate(contents)]
-
-
-def test_bm25_keeps_at_most_five_and_ranks_the_best_first() -> None:
-    facts = _docs(
-        *[{"extractor": "ports", "port": 9000 + i} for i in range(7)],
-        {"extractor": "ports", "port": 8113, "via": "rest api"},
-    )
-    found = search(query_tokens("The REST API listens on port 8113.", None), facts)
-    assert found[0].id == 8
-    assert len(found) == 1  # "ports"/"port" are a value and a key: no other fact shares a token
-
-
-def test_bm25_top_five_when_more_match() -> None:
-    facts = _docs(*[{"tool": "chatroom_post_message", "param": f"p{i}"} for i in range(8)])
-    found = search(query_tokens("chatroom_post_message takes a body", None), facts)
-    assert [f.id for f in found] == [1, 2, 3, 4, 5]
-
-
-def test_bm25_scores_a_single_matching_fact_above_zero() -> None:
-    # rank-bm25's own idf goes negative for a one-document corpus; ours does not.
-    assert [f.id for f in search(["8113"], _docs({"port": 8113}))] == [1]
-
-
-def test_bm25_keys_are_not_indexed() -> None:
-    assert search(query_tokens("the port is configurable", None), _docs({"port": 8113})) == []
-
-
-def test_query_includes_the_subject_string_values() -> None:
-    assert "chatroom_get_thread" in query_tokens("a tool", json.dumps({"polarity": "current", "tool": "chatroom_get_thread", "param": "x"}))
-
-
-def test_japanese_claim_finds_a_japanese_fact() -> None:
-    facts = _docs({"extractor": "service_health", "service": "lexora", "status": "稼働中"}, {"note": "無関係"})
-    found = search(query_tokens("Lexora は稼働中です", None), facts)
-    assert [f.id for f in found] == [1]
 
 
 def test_japanese_claim_reaches_the_llm_instead_of_no_candidates(conn) -> None:

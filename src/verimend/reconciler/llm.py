@@ -9,7 +9,7 @@ seen here; neither is a claim a checker decided.
 
 Per claim:
 
-1. **Retrieval.** BM25 (``rank-bm25``) over the facts of the claim's run and
+1. **Retrieval** (``verimend.reconciler.retrieval``). BM25 over the facts of the claim's run and
    repository -- the deterministic stage's own scope. The query is the claim
    text plus the subject's string values; both sides go through
    ``verimend.reconciler.tokenize``. The top five facts with a score above 0
@@ -66,15 +66,12 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import sqlite3
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from typing import Any
-
-from rank_bm25 import BM25Okapi
 
 from verimend.collector.facts import canonical_json
 from verimend.extractor.client import LexoraClient, LLMClient
@@ -91,11 +88,10 @@ from verimend.llm_policy import (
     count_permanent,
     request,
 )
-from verimend.reconciler.tokenize import tokenize
+from verimend.reconciler.retrieval import FactDoc, query_tokens, search
 
 log = logging.getLogger(__name__)
 
-TOP_K = 5
 FACT_CONTENT_MAX = 1500
 REASON_MAX = 300
 RESULTS = frozenset({"verified", "stale", "unverifiable"})
@@ -127,77 +123,6 @@ class JudgeAborted(Exception):
         super().__init__(f"{reason}: {detail}")
         self.reason = reason
         self.detail = detail
-
-
-# --------------------------------------------------------------- retrieval
-
-
-@dataclass(frozen=True)
-class FactDoc:
-    id: int
-    kind: str
-    content: dict[str, Any]
-
-
-class _BM25(BM25Okapi):
-    """BM25Okapi with the non-negative idf ``log(1 + (N - n + 0.5) / (n + 0.5))`` (Lucene's).
-
-    rank-bm25's own idf is negative for a term in more than half of the
-    documents and floors it at ``epsilon * average_idf`` -- which is itself
-    negative when the corpus is one or two facts, so a fact that *does* match
-    the query would score below 0 and never become a candidate. With this idf
-    a score is above 0 exactly when the fact shares a token with the query.
-    """
-
-    def _calc_idf(self, nd: dict[str, int]) -> None:
-        for word, freq in nd.items():
-            self.idf[word] = math.log(1 + (self.corpus_size - freq + 0.5) / (freq + 0.5))
-        self.average_idf = sum(self.idf.values()) / len(self.idf) if self.idf else 0.0
-
-
-def fact_tokens(content: Any) -> list[str]:
-    """Tokens of a fact's *values* (strings and numbers, recursively). Keys are not indexed.
-
-    Every ``ports`` fact has a ``port`` key; indexing keys would make "port"
-    in a claim match all of them.
-    """
-    out: list[str] = []
-    if isinstance(content, dict):
-        for value in content.values():
-            out.extend(fact_tokens(value))
-    elif isinstance(content, list):
-        for value in content:
-            out.extend(fact_tokens(value))
-    elif isinstance(content, str):
-        out.extend(tokenize(content))
-    elif isinstance(content, (int, float)) and not isinstance(content, bool):
-        out.extend(tokenize(str(content)))
-    return out
-
-
-def query_tokens(text: str, subject_json: str | None) -> list[str]:
-    """The claim text plus the string values of its subject, if it has one."""
-    parts = [text]
-    if subject_json:
-        try:
-            subject = json.loads(subject_json)
-        except json.JSONDecodeError:
-            subject = None
-        if isinstance(subject, dict):
-            parts.extend(v for v in subject.values() if isinstance(v, str))
-    return tokenize(" ".join(parts))
-
-
-def search(query: Sequence[str], facts: Sequence[FactDoc], k: int = TOP_K) -> list[FactDoc]:
-    """The top ``k`` facts by BM25 score, score > 0 only; ties keep fact order."""
-    if not query or not facts:
-        return []
-    corpus = [fact_tokens(f.content) for f in facts]
-    if not any(corpus):
-        return []
-    scores = _BM25(corpus).get_scores(list(query))
-    ranked = sorted((i for i in range(len(facts)) if scores[i] > 0), key=lambda i: (-scores[i], i))
-    return [facts[i] for i in ranked[:k]]
 
 
 # ----------------------------------------------------------------- session
