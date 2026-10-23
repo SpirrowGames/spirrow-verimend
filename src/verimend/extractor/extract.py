@@ -280,7 +280,7 @@ class ExtractionSession:
         into ``detail``. With no cause the raise carries no ``from``, so an implicit ``__context__`` survives.
         """
         detail = {"reason": reason, "at_chunk": at_chunk, **{k: v for k, v in extra.items() if v is not None}}
-        log.error("extraction aborted: %s", detail)
+        log.error("extraction aborted: %s", detail, exc_info=cause)  # traceback of the cause, if any
         if self.strict:
             if cause is not None:
                 raise ExtractorAborted(reason, detail) from cause

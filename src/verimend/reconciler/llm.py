@@ -237,7 +237,7 @@ class JudgeSession:
         Same contract as the extractor's ``_abort``: ``cause`` is chained with ``from`` and never stored.
         """
         detail = {"reason": reason, "at_claim": at_claim, **{k: v for k, v in extra.items() if v is not None}}
-        log.error("LLM judge aborted: %s", detail)
+        log.error("LLM judge aborted: %s", detail, exc_info=cause)  # traceback of the cause, if any
         if self.strict:
             if cause is not None:
                 raise JudgeAborted(reason, detail) from cause

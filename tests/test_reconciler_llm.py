@@ -392,3 +392,12 @@ def test_a_non_strict_abort_record_carries_no_cause(conn) -> None:
     run, fact, _ = _setup(conn, 3)
     _both_stages(conn, run, _judge(FakeClient(http(400), http(400), http(400))))
     assert set(_stats(conn, run)["llm_aborted"]) == {"reason", "at_claim", "status"}
+
+
+def test_a_non_strict_abort_logs_the_cause_traceback(conn, caplog) -> None:
+    run, fact, _ = _setup(conn, 3)
+    third = http(400)
+    with caplog.at_level("ERROR"):
+        _both_stages(conn, run, _judge(FakeClient(http(400), http(400), third)))
+    (record,) = [r for r in caplog.records if r.getMessage().startswith("LLM judge aborted")]
+    assert record.exc_info is not None and record.exc_info[1].__cause__ is third

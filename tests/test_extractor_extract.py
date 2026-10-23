@@ -406,3 +406,13 @@ def test_an_abort_without_a_cause_keeps_the_implicit_context() -> None:
             s._abort("consecutive_transient", {"doc_repo": "o/r", "doc_path": "d.md", "lines": [1, 2]})
     assert info.value.__cause__ is None and info.value.__context__ is marker
     assert info.value.__suppress_context__ is False
+
+
+def test_a_non_strict_abort_logs_the_cause_traceback(caplog) -> None:
+    third = http(400)
+    s, _ = session(FakeClient(http(400), http(400), third))
+    with caplog.at_level("ERROR"):
+        s.extract(FOUR)
+    (record,) = [r for r in caplog.records if r.getMessage().startswith("extraction aborted")]
+    assert record.exc_info is not None and record.exc_info[1].__cause__ is third
+    assert "cause" not in s.aborted
