@@ -114,12 +114,14 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 
 | 区分 | 該当 | 扱い | 本番の run | 評価（`run_e2e`） |
 |---|---|---|---|---|
-| 設定の誤り | `lexora_url` 未設定（チャンクを作る前に検査）、401、403 | `ExtractorConfigError`、再試行しない | run を `failed`、`stats_json.extract.config_error`（`lexora_url_unset` / `http_401` / `http_403`）、reconcile しない、0 以外で終了、保存済みのファクトは残す | 例外を伝え、点数は出さない |
+| 設定の誤り | `lexora_url` 未設定（チャンクを作る前に検査）、401、403、404（OpenAI 互換 API で 404 はエンドポイントかモデル＝ティアが無いとき。要求の中身では直らない） | `ExtractorConfigError`、再試行しない | run を `failed`、`stats_json.extract.config_error`（`lexora_url_unset` / `http_401` / `http_403` / `http_404`）、reconcile しない、0 以外で終了、保存済みのファクトは残す | 例外を伝え、点数は出さない |
 | 一時的 | timeout、接続エラー、5xx、429、408 | 1 回だけ再試行。429 / 503 の `Retry-After`（0 以上の整数の秒数のみ）が上限以下ならその秒数、それ以外（ヘッダ無し、HTTP-date、読めない値、他の status）は 2 秒待つ | 再試行も失敗したらチャンク失敗（`http_<status>` / `transport`）。チャンクをまたいで連続 3 回で打ち切り（`consecutive_transient_failures`）。成功したチャンクで数は 0 に戻る | 1 件でも失敗したら `ExtractorAborted` |
 | 一時的・待てない | 429 / 503 で `Retry-After` > `lexora_retry_after_max_s` | 再試行しない | その場で打ち切り（`retry_after_exceeds_max`）。次のチャンクは送らない | `ExtractorAborted` |
-| 恒久的 | 上記以外の 4xx（400、413、422 など）、`oversized_line`、`schema` | 再試行しない（`schema` は上の出力の再試行のみ）。連続失敗の数に入れない | チャンク失敗、run は `partial` | 点数に反映する（抽出器の品質） |
+| 恒久的 | 上記以外の 4xx（400、413、422 など）、`oversized_line`、`schema` | 再試行しない（`schema` は上の出力の再試行のみ）。一時的な失敗の連続数に入れない | チャンク失敗、run は `partial` | 点数に反映する（抽出器の品質） |
+| 恒久的・HTTP の連続 | 恒久的な 4xx がチャンクをまたいで連続 3 回（知らないティアに 400 が返る場合など）。数は Lexora の呼び出しが 1 回成功したときだけ 0 に戻る（一時的な失敗が挟まっても戻らない）。`schema` / `oversized_line` は数えない。一時的な失敗の連続数とは別に数える | — | 3 回目でその場で打ち切り（`permanent_http_streak`、`status` 付き）。正しい設定で 4xx が 3 回続くのは要求の組み立てか設定が壊れている合図 | `ExtractorAborted`（設定の誤りを点数に混ぜない）。1 回だけの恒久的な失敗は従来どおり点数に反映 |
 
-- 打ち切り: 残りのチャンク（以降の文書を含む）は Lexora を呼ばずに `extractor_aborted` のチャンク失敗。`stats_json.extract.aborted` = `{reason, at_chunk: {doc_repo, doc_path, lines}[, retry_after_s]}`。run は `partial` で、抽出できた分は reconcile する。打ち切られた文書は `failed` なので次の run で抽出し直される
+- HTTP の分類と再試行は `verimend/llm_policy.py` にあり、reconciler の LLM 判定（5.3）と共有する
+- 打ち切り: 残りのチャンク（以降の文書を含む）は Lexora を呼ばずに `extractor_aborted` のチャンク失敗。`stats_json.extract.aborted` = `{reason, at_chunk: {doc_repo, doc_path, lines}[, retry_after_s][, status]}`（`reason` = `consecutive_transient_failures` / `retry_after_exceeds_max` / `permanent_http_streak`）。run は `partial` で、抽出できた分は reconcile する。打ち切られた文書は `failed` なので次の run で抽出し直される
 - チャンク失敗は `stats_json.extract.failed_chunks` に `{doc_repo, doc_path, lines, error}` で記録する。`error` は `schema` / `http_<status>` / `transport` / `oversized_line` / `extractor_aborted`。偽の claim 行は入れない
 - `partial` と `failed` の境界: `failed` は環境が壊れている（設定の誤り）か想定外の例外。`partial` は一時的な停止・打ち切り・チャンク単位の失敗（collector の失敗と同じ封じ込め）。どちらも 0 以外で終了する
 - 評価: `python -m verimend.eval`（要 `VERIMEND_LEXORA_URL`）が golden set の各ケースを `run_e2e` に通し、deterministic 層で採点する。CI では閾値ゲートを入れない（テストは録画済みの応答で 1 ケースを通す）
