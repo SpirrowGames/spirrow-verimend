@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # imported lazily below: verimend.extractor imports this module
     from verimend.extractor.client import Completion, LLMClient
@@ -159,10 +159,3 @@ def parse_retry_after(value: str | None) -> int | None:
         return None
     value = value.strip()
     return int(value) if value.isascii() and value.isdigit() else None
-
-
-def abort_record(reason: str, where_key: str, where: Any, **extra: Any) -> dict[str, Any]:
-    """``{reason, <where_key>: where[, retry_after_s][, status]}`` -- the shape of ``stats.*.aborted``."""
-    record: dict[str, Any] = {"reason": reason, where_key: where}
-    record.update({k: v for k, v in extra.items() if v is not None})
-    return record
