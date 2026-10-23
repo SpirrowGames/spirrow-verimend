@@ -1,0 +1,10 @@
+{
+  "claims": [
+    {"id": "c1", "anchor": [3, 3], "claim_type": "link", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["tool:deploy_request"], "note": "lives in src/magickit/mcp/tools/deploy.py"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "link", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["entry:python -m magickit.mcp_server"], "note": "src/magickit/mcp_server.py"},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "link", "subject": null, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": ""},
+    {"id": "c4", "anchor": [6, 6], "claim_type": "version", "subject": null, "final": "unverifiable", "deterministic": "deferred", "evidence_keys": [], "note": "no version facts are collected"}
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

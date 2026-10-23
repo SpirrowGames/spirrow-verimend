@@ -1,0 +1,5 @@
+[
+  {"key": "port:8117@spirrow-magickit-mcp-local.service", "source_kind": "file", "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:spirrow-magickit-mcp-local.service:28", "content": {"extractor": "ports", "port": 8117, "via": "key_value", "context": "Environment=MAGICKIT_MCP_PORT=8117"}},
+  {"key": "port:8114@config/magickit_config.yaml", "source_kind": "file", "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:config/magickit_config.yaml:14", "content": {"extractor": "ports", "port": 8114, "via": "key_value", "context": "port: 8114"}},
+  {"key": "entry:spirrow-magickit-mcp-local.service", "source_kind": "config", "source_ref": "SpirrowGames/spirrow-magickit@2ad86bf830cd2b09ee590daf7ad5bd06ec045f23:spirrow-magickit-mcp-local.service:13", "content": {"extractor": "entrypoints", "kind": "systemd_exec", "unit": "spirrow-magickit-mcp-local.service", "command": "/home/sgadmin/services/spirrow/spirrow-magickit/venv/bin/python -m magickit.mcp_server"}}
+]

@@ -1,0 +1,10 @@
+{
+  "claims": [
+    {"id": "c1", "anchor": [3, 3], "claim_type": "behavior", "subject": null, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": "summary: Does NOT deploy"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_approve", "param": "request_id"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_approve", "param": "approved_by"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c4", "anchor": [6, 6], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "deploy_status", "param": "request_id"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""}
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

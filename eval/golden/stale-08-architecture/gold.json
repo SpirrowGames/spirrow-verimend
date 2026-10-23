@@ -1,0 +1,9 @@
+{
+  "claims": [
+    {"id": "c1", "anchor": [3, 3], "claim_type": "architecture", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["env:PATH@DatabaseConfig", "env:MAGICKIT_DB_PATH"], "note": "SQLite file data/magickit.db"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "architecture", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["port:8113@config/magickit_config.yaml", "port:8114@config/magickit_config.yaml"], "note": "8113 and 8114"},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "architecture", "subject": null, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": ""}
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

@@ -1,0 +1,9 @@
+{
+  "claims": [
+    {"id": "c1", "anchor": [3, 3], "claim_type": "behavior", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["tool:chatroom_close_thread"], "note": "owner-only"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "behavior", "subject": null, "final": "stale", "deterministic": "deferred", "evidence_keys": ["tool:deploy_request", "tool:deploy_approve"], "note": "Does NOT deploy; needs deploy_approve"},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "behavior", "subject": null, "final": "verified", "deterministic": "deferred", "evidence_keys": [], "note": ""}
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

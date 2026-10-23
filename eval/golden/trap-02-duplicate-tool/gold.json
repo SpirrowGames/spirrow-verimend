@@ -1,0 +1,9 @@
+{
+  "claims": [
+    {"id": "c1", "anchor": [3, 3], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "search", "param": "query"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": "both definitions"},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "search", "param": "limit"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": "one of two definitions has it"},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "parameter", "subject": {"polarity": "current", "tool": "search", "param": "cursor"}, "final": "stale", "deterministic": "deferred", "evidence_keys": ["tool:search@knowledge", "tool:search@documents"], "note": "two definitions: not deterministic, but both closed without it"}
+  ],
+  "non_claims": [],
+  "injected_invalid": []
+}

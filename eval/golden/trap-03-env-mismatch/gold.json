@@ -1,0 +1,13 @@
+{
+  "claims": [
+    {"id": "c1", "anchor": [3, 3], "claim_type": "parameter", "subject": {"polarity": "current", "env": "MAGICKIT_LOG_FORMAT"}, "final": "verified", "deterministic": "verified", "evidence_keys": [], "note": ""},
+    {"id": "c2", "anchor": [4, 4], "claim_type": "parameter", "subject": {"polarity": "current", "env": "MAGICKIT_API_TOKEN"}, "final": "unverifiable", "deterministic": "deferred", "evidence_keys": [], "note": "unread env: runtime keys are invisible, never stale"},
+    {"id": "c3", "anchor": [5, 5], "claim_type": "parameter", "subject": {"polarity": "current", "env": "MAGICKIT_REDIS_URL"}, "final": "unverifiable", "deterministic": "deferred", "evidence_keys": [], "note": "unread env"}
+  ],
+  "non_claims": [
+    {"anchor": [7, 7], "reason": "normative advice"}
+  ],
+  "injected_invalid": [
+    {"anchor": [4, 4], "claim_type": "parameter", "raw_subject_json": "{\"polarity\": \"current\", \"env\": \"MAGICKIT_API_TOKEN\", \"tool\": \"x\"}", "note": "mixes both parameter shapes"}
+  ]
+}

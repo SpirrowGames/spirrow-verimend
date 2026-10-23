@@ -300,6 +300,16 @@ def test_load_cases_fails_on_any_broken_case(tmp_path: Path) -> None:
         load_cases(root)
 
 
+@pytest.mark.parametrize("kind", ["missing", "file"])
+def test_load_cases_refuses_a_root_that_is_not_a_directory(tmp_path: Path, kind: str) -> None:
+    root = tmp_path / "golden"
+    if kind == "file":
+        root.write_text("not a directory\n", encoding="utf-8")
+    with pytest.raises(GoldenCaseError, match="golden set directory") as excinfo:
+        load_cases(root)
+    assert str(root) in str(excinfo.value)
+
+
 # --------------------------------------------------------------- oracle
 
 
