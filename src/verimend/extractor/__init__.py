@@ -18,6 +18,9 @@ from verimend.extractor.stage import extract_documents
 def session_from_settings(settings, **kwargs) -> ExtractionSession:
     """An ``ExtractionSession`` on Lexora as configured. Raises ``ExtractorConfigError`` without a URL.
 
+    The session owns the ``LexoraClient``; close it with ``session.close()``
+    or use it as a context manager.
+
     Called before a single chunk is built, so an unset URL fails the run
     before any work is done.
     """

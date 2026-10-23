@@ -81,8 +81,8 @@ def run_pipeline(
         extract: dict[str, Any] = {}
         stats["extract"] = extract
         try:
-            session = make_session()
-            extract_documents(conn, run_id, documents, session, stats=extract)
+            with make_session() as session:
+                extract_documents(conn, run_id, documents, session, stats=extract)
         except ExtractorConfigError as exc:
             conn.rollback()
             log.error("extraction stage: configuration error %s; the run fails and is not reconciled", exc.reason)

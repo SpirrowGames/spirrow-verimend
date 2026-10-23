@@ -205,6 +205,23 @@ class ExtractionSession:
         self.consecutive_transient = 0
         self.aborted: dict[str, Any] | None = None
 
+    def close(self) -> None:
+        """Release the client's resources (``LexoraClient``'s connection pool), if it holds any.
+
+        The session owns its client: whoever ends the session closes it, so a
+        long-running process that runs the pipeline repeatedly does not leak
+        a pool per run.
+        """
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            close()
+
+    def __enter__(self) -> "ExtractionSession":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def chunks(self, document: Document) -> list[Chunk]:
         return chunk_document(document.text)
 

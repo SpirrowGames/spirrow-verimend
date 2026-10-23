@@ -31,8 +31,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(f"unknown case(s): {', '.join(sorted(unknown))}")
         cases = [c for c in cases if c.id in args.case]
 
-    session = session_from_settings(get_settings(), strict=True)
-    results = [run_e2e(case, session) for case in cases]
+    with session_from_settings(get_settings(), strict=True) as session:
+        results = [run_e2e(case, session) for case in cases]
     for r in results:
         print(f"{r.case_id}: {_summary(r.score)}  failed_chunks={len(r.extract['failed_chunks'])}")
     total = Score.combine(r.score for r in results)

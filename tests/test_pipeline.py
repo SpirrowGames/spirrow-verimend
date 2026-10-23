@@ -150,6 +150,20 @@ def test_unset_lexora_url_fails_before_any_llm_call(db, source, monkeypatch) -> 
     assert reconciled == [] and n_claims == 0 and facts >= 1
 
 
+class Closable(FakeClient):
+    closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+@pytest.mark.parametrize("reply", ["[]", http(401)], ids=["success", "config-error"])
+def test_the_pipeline_closes_the_session_client(db, source, reply) -> None:
+    client = Closable(by_chunk=lambda start: reply)
+    _run(db, source, lambda: session(client)[0])
+    assert client.closed == 1
+
+
 def test_a_failed_run_is_not_a_cache_source(db, source) -> None:
     _run(db, source, lambda: session(FakeClient(by_chunk=lambda s: http(401)))[0])
     client = FakeClient(by_chunk=lambda s: "[]")
