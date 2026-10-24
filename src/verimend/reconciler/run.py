@@ -1,4 +1,4 @@
-"""One reconciliation pass over a run's claims (docs/design.md 5.3, M2a: deterministic only).
+"""One deterministic reconciliation pass over a run's claims (docs/design.md 5.3, M2a).
 
 ``reconcile`` takes every claim of the run that has no verdict yet and decides
 each one from its structured subject, against the facts of the same run and
@@ -7,7 +7,8 @@ the same repository. A claim ends the pass in exactly one of these states:
 =========================================  =====================================  =================
 subject                                    outcome                                counted as
 =========================================  =====================================  =================
-NULL, or a type with no checker            no verdict (left for the LLM stage)    ``deferred``
+NULL, or a type with no checker            no verdict (left for the LLM stage,    ``deferred``
+                                           ``verimend.reconciler.llm``)
 not JSON, or violates its schema           verdict ``unverifiable`` /             ``invalid_subject``
                                            ``deterministic``, ``log.error``
 valid, ``polarity`` not ``current``        no verdict                             ``deferred``
@@ -101,7 +102,7 @@ def reconcile(conn: sqlite3.Connection, run_id: int) -> ReconcileResult:
         _write(conn, claim_id, decision.result, decision.evidence(claim_type))
         stats[decision.result] += 1
 
-    _record_totals(conn, run_id)
+    record_totals(conn, run_id)
     conn.commit()
     return ReconcileResult(run_id=run_id, stats=stats)
 
@@ -128,15 +129,32 @@ def _write(conn: sqlite3.Connection, claim_id: int, result: str, evidence: dict[
     )
 
 
-def _record_totals(conn: sqlite3.Connection, run_id: int) -> None:
+def record_totals(conn: sqlite3.Connection, run_id: int) -> None:
+    """Recompute ``stats.reconcile``'s counters from the tables. Other keys of the entry are kept.
+
+    ``verified`` / ``stale`` / ``unverifiable`` count every verdict, whichever
+    stage wrote it. Once the LLM stage has written a verdict, ``llm_verified``
+    / ``llm_stale`` / ``llm_unverifiable`` / ``llm_downgraded`` count the
+    ``method = llm`` ones; a run without one keeps the M2a shape.
+    """
     totals = dict.fromkeys(("verified", "stale", "unverifiable", "deferred", "invalid_subject"), 0)
-    for result, evidence_json in conn.execute(
-        "SELECT v.result, v.evidence_json FROM verdict AS v JOIN claim AS c ON c.id = v.claim_id WHERE c.run_id = ?",
+    llm = dict.fromkeys(("llm_verified", "llm_stale", "llm_unverifiable", "llm_downgraded"), 0)
+    any_llm = False
+    for result, method, evidence_json in conn.execute(
+        "SELECT v.result, v.method, v.evidence_json FROM verdict AS v JOIN claim AS c ON c.id = v.claim_id"
+        " WHERE c.run_id = ?",
         (run_id,),
     ):
         totals[result] += 1
-        if json.loads(evidence_json).get("error") == SUBJECT_SCHEMA_VIOLATION:
+        evidence = json.loads(evidence_json)
+        if evidence.get("error") == SUBJECT_SCHEMA_VIOLATION:
             totals["invalid_subject"] += 1
+        if method == "llm":
+            any_llm = True
+            llm[f"llm_{result}"] += 1
+            llm["llm_downgraded"] += int(evidence.get("downgraded") is True)
+    if any_llm:
+        totals.update(llm)
     totals["deferred"] = conn.execute(
         "SELECT count(*) FROM claim AS c LEFT JOIN verdict AS v ON v.claim_id = c.id"
         " WHERE c.run_id = ? AND v.id IS NULL",
@@ -145,5 +163,5 @@ def _record_totals(conn: sqlite3.Connection, run_id: int) -> None:
 
     (stats_json,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
     stats = json.loads(stats_json) if stats_json else {}
-    stats["reconcile"] = totals
+    stats.setdefault("reconcile", {}).update(totals)
     conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))

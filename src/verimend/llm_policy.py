@@ -119,9 +119,11 @@ def request(
     for attempt in (1, 2):
         try:
             completion = client.complete(messages, tier)
-        except LLMTransportError:
+        except LLMTransportError as exc:
+            last: Exception = exc
             error, wait = ERROR_TRANSPORT, DEFAULT_WAIT_S
         except LLMHTTPError as exc:
+            last = exc
             error = f"http_{exc.status}"
             if exc.status in CONFIG_STATUSES:
                 raise ConfigStatus(exc.status) from exc
@@ -140,7 +142,7 @@ def request(
             streaks.permanent_http = 0
             return completion
         if attempt == 2:
-            raise Transient(error)
+            raise Transient(error) from last  # the second attempt's client error, as with the other raises
         sleep(wait)
     raise AssertionError("unreachable")
 

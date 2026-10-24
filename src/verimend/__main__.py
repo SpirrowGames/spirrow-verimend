@@ -13,6 +13,7 @@ from verimend.collector.run import STATUS_FAILED, STATUS_PARTIAL, github_checkou
 from verimend.db import connection
 from verimend.extractor import session_from_settings
 from verimend.pipeline import run_pipeline
+from verimend.reconciler import judge_from_settings
 from verimend.db import migrate as run_migrations
 from verimend.settings import get_settings
 from verimend.targets import load_targets
@@ -31,7 +32,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="limit to this target (repeatable); default is every target in targets.yaml",
     )
     run_parser = sub.add_parser(
-        "run", help="collect, extract claims (Lexora) and reconcile them in one crawl_run, then exit"
+        "run", help="collect, extract claims and reconcile them (checkers, then the Lexora judge) in one crawl_run, then exit"
     )
     run_parser.add_argument(
         "--repo",
@@ -105,6 +106,7 @@ def _run(settings, repos: list[str] | None) -> int:
             checkout,
             lambda: session_from_settings(settings),
             magickit_health_source(settings.magickit_url, settings.magickit_timeout_s),
+            make_judge=lambda: judge_from_settings(settings),
         )
     print(f"crawl_run {result.run_id}: {result.status}")
     print(json.dumps(result.stats, indent=2, ensure_ascii=False))
