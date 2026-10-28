@@ -163,6 +163,10 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 
 ### 5.4 mender
 - stale のみパッチ草案を生成。アンカー範囲外の変更は生成しても棄却（diff の暴走防止）
+  - M3a（`verimend/mender/draft.py`）: その run の `result = stale` かつ `patch_draft IS NULL` の verdict に草案を書く（再実行で作り直さない）。LLM（`VERIMEND_MENDER_TIER`、既定 `heavy`）が返すのはアンカー範囲を置き換える行 `{"lines": [...]}` だけで、unified diff は verimend が計算する。範囲外の変更は作り方の上で表現できない
+  - 呼ぶ前の確認（満たさなければ LLM を呼ばず `stats_json.mend.skipped` に理由ごとに数える）: `no_evidence`（`evidence_json.fact_ids` が空でない整数のリストで、全部その run のファクト）、`doc_changed`（extractor が読んだ本文の SHA-256 がその run の `document.content_hash` と一致）、`no_anchor`（アンカーが文書の中）
+  - 棄却（`stats_json.mend.rejected`）: `empty`（空・空白だけ）、`no_change`（元の行と同じ）、`runaway`（元の行数の 3 倍と 10 行の大きい方を超える）
+  - Lexora の失敗は 5.3 の LLM 段と同じ区分で、単位は verdict。どの失敗も run を `partial` にする。`stats_json.mend.aborted = {reason, at_verdict[, retry_after_s][, status]}`、`config_error = {status, at_verdict}`
 - ブランチ: `verimend/YYYY-MM-DD`。1クロール1PR、対象リポジトリごと
 - PR本文: 「決定的検証済み」「LLM判定」の2セクション。各項目にクレーム原文・根拠・判定方法を記載
 - 自動適用（PRを経ない直接 commit）は v1 では実装しない。全修正が PR 経由。マージ率の実績が出た後、決定的検証済みカテゴリのみ v2 で検討

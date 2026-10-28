@@ -48,12 +48,15 @@ class Settings(BaseSettings):
     # An empty value is rejected here; a tier Lexora does not know is caught at
     # the first request (404: configuration error; repeated 4xx: an abort).
     reconciler_tier: str = "light"
+    # The Lexora tier the mender asks for its patch drafts (docs/design.md 6:
+    # Heavy -- few calls, quality first). Empty is rejected like reconciler_tier.
+    mender_tier: str = "heavy"
 
-    @field_validator("reconciler_tier")
+    @field_validator("reconciler_tier", "mender_tier")
     @classmethod
-    def _tier_not_empty(cls, value: str) -> str:
+    def _tier_not_empty(cls, value: str, info) -> str:
         if not value.strip():
-            raise ValueError("reconciler_tier must not be empty")
+            raise ValueError(f"{info.field_name} must not be empty")
         return value
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -12,7 +13,8 @@ from extractor_fakes import FakeClient, claims, http, port_claim, session, trans
 from verimend import __main__ as cli
 from verimend import pipeline as pipeline_module
 from verimend.db import connection, migrate
-from verimend.extractor import ExtractorConfigError
+from verimend.extractor import Completion, ExtractorConfigError
+from verimend.mender import MenderConfigError, MenderSession
 from verimend.reconciler import JudgeSession
 from verimend.pipeline import doc_paths, run_pipeline
 from verimend.targets import parse_targets
@@ -66,9 +68,11 @@ def _port_on_line_3(start: int) -> str:
     return claims(port_claim(3, 8120)) if start == 1 else "[]"
 
 
-def _run(db, source, make_session, make_judge=None):
+def _run(db, source, make_session, make_judge=None, make_mender=None):
     with connection(db) as conn:
-        result = run_pipeline(conn, _targets(), _checkout(source), make_session, make_judge=make_judge)
+        result = run_pipeline(
+            conn, _targets(), _checkout(source), make_session, make_judge=make_judge, make_mender=make_mender
+        )
         row = conn.execute("SELECT status, stats_json FROM crawl_run WHERE id = ?", (result.run_id,)).fetchone()
         claim_count = conn.execute("SELECT count(*) FROM claim WHERE run_id = ?", (result.run_id,)).fetchone()[0]
         verdicts = conn.execute(
@@ -263,6 +267,71 @@ def test_three_400s_in_the_extraction_stage_abort_it(db, source) -> None:
 
 
 # ------------------------------------------------------------------ CLI
+
+
+class StaleJudge(FakeClient):
+    """Judges every claim stale on the first candidate fact it is shown."""
+
+    def complete(self, messages, tier):
+        self.calls.append(messages)
+        fact_id = int(re.search(r'"fact_id": (\d+)', messages[1]["content"]).group(1))
+        return Completion(text=json.dumps({"result": "stale", "fact_ids": [fact_id], "reason": "r"}), model="m")
+
+
+def _mender(client) -> MenderSession:
+    return MenderSession(client, prompt="mender prompt", sleep=lambda s: None)
+
+
+def _drafts(db, run_id):
+    with connection(db) as conn:
+        return conn.execute(
+            "SELECT v.patch_draft FROM verdict v JOIN claim c ON c.id = v.claim_id WHERE c.run_id = ? ORDER BY v.id",
+            (run_id,),
+        ).fetchall()
+
+
+def test_the_mender_drafts_the_stale_verdicts_from_the_checkout_text(db, source) -> None:
+    mender_client = FakeClient(*[json.dumps({"lines": ["fixed"]})] * 3)
+    result, status, stats, _, verdicts, _ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0],
+        lambda: _judge(StaleJudge()), lambda: _mender(mender_client),
+    )
+    assert status == "succeeded" and verdicts == ["stale"] * 3
+    assert len(mender_client.calls) == 3
+    assert "The service listens on port 8120." in mender_client.calls[0][1]["content"]
+    assert stats["mend"]["drafted"] == 3 and stats["mend"]["skipped"]["doc_changed"] == 0
+    drafts = [row[0] for row in _drafts(db, result.run_id)]
+    assert all(d and "\n+fixed" in d for d in drafts)  # the checkout's line endings are kept (CRLF on Windows)
+    assert "\n-The service listens on port 8120." in drafts[0]
+
+
+def test_a_mender_failure_makes_the_run_partial_and_keeps_the_verdicts(db, source) -> None:
+    mender_client = FakeClient(http(400), http(400), http(400))
+    _, status, stats, _, verdicts, _ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0],
+        lambda: _judge(StaleJudge()), lambda: _mender(mender_client),
+    )
+    assert status == "partial" and verdicts == ["stale"] * 3
+    assert stats["mend"]["aborted"]["reason"] == "permanent_http_streak"
+
+
+def test_an_unbuildable_mender_is_a_config_error_and_the_run_partial(db, source) -> None:
+    def no_url():
+        raise MenderConfigError("lexora_url_unset")
+
+    _, status, stats, _, verdicts, _ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0],
+        lambda: _judge(StaleJudge()), no_url,
+    )
+    assert status == "partial" and verdicts == ["stale"] * 3
+    assert stats["mend"] == {"config_error": {"reason": "lexora_url_unset"}}
+
+
+def test_no_mender_means_no_mend_stats(db, source) -> None:
+    _, status, stats, *_ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0], lambda: _judge(StaleJudge())
+    )
+    assert status == "succeeded" and "mend" not in stats
 
 
 def test_cli_run_without_lexora_url_exits_non_zero_and_fails_the_run(tmp_path, source, monkeypatch, capsys) -> None:

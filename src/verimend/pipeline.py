@@ -18,6 +18,9 @@ How the run ends (design 5.2):
   never ``failed``: extraction succeeded before it, and failing the run would
   stop it being a cache source (``verimend.reconciler.llm``). The claims it
   could not judge stay ``deferred``; the verdicts written stay.
+- the mender (M3a, ``verimend.mender``) runs last, on the same documents; any
+  Lexora failure of it -- a verdict failure, an abort, a configuration error
+  -- makes the run ``partial`` the same way. Drafts already written stay.
 - any other error marks the run ``failed`` and propagates.
 """
 
@@ -46,6 +49,7 @@ from verimend.collector.run import (
 )
 from verimend.collector.tree import RepoTree
 from verimend.extractor import Document, ExtractionSession, ExtractorConfigError, extract_documents
+from verimend.mender import MenderConfigError, MenderSession, mend_stage_failed, mend_stale
 from verimend.reconciler import JudgeConfigError, JudgeSession, judge_deferred, llm_stage_failed, reconcile
 from verimend.targets import Target
 
@@ -66,6 +70,7 @@ def run_pipeline(
     make_session: Callable[[], ExtractionSession],
     health_source: HealthSource | None = None,
     make_judge: Callable[[], JudgeSession] | None = None,
+    make_mender: Callable[[], MenderSession] | None = None,
 ) -> PipelineResult:
     """Run every stage into one new crawl_run and return how it ended.
 
@@ -73,6 +78,8 @@ def run_pipeline(
     built; it raises ``ExtractorConfigError`` when Lexora is not configured.
     ``make_judge`` is called once, after the deterministic stage; without it
     the LLM stage does not run and undecided claims stay ``deferred``.
+    ``make_mender`` is called once, after the reconciler; without it no patch
+    draft is written.
     """
     run_id = start_run(conn)
     stats: dict[str, Any] = {"targets": {}}
@@ -104,9 +111,11 @@ def run_pipeline(
         reconcile(conn, run_id)
         if make_judge is not None:
             _judge(conn, run_id, make_judge)
+        if make_mender is not None:
+            _mend(conn, run_id, documents, make_mender)
         (stats_json,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
         stats = json.loads(stats_json)
-        if llm_stage_failed(stats.get("reconcile", {})):
+        if llm_stage_failed(stats.get("reconcile", {})) or mend_stage_failed(stats.get("mend", {})):
             status = STATUS_PARTIAL
     except BaseException:
         conn.rollback()
@@ -123,13 +132,31 @@ def _judge(conn: sqlite3.Connection, run_id: int, make_judge: Callable[[], Judge
     except JudgeConfigError as exc:
         log.error("LLM judge: configuration error %s; deferred claims stay deferred", exc.reason)
         (stats_json,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
-        stats = json.loads(stats_json) if stats_json else {}
+        stats = json.loads(stats_json)  # start_run wrote '{}': never NULL here
         stats.setdefault("reconcile", {})["llm_config_error"] = {"reason": exc.reason}
         conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))
         conn.commit()
         return
     with judge:
         judge_deferred(conn, run_id, judge)
+
+
+def _mend(
+    conn: sqlite3.Connection, run_id: int, documents: Sequence[Document], make_mender: Callable[[], MenderSession]
+) -> None:
+    """The mender stage. A mender that cannot even be built is recorded like a configuration error."""
+    try:
+        mender = make_mender()
+    except MenderConfigError as exc:
+        log.error("mender: configuration error %s; no patch drafts", exc.reason)
+        (stats_json,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
+        stats = json.loads(stats_json)
+        stats["mend"] = {"config_error": {"reason": exc.reason}}
+        conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))
+        conn.commit()
+        return
+    with mender:
+        mend_stale(conn, run_id, documents, mender)
 
 
 def doc_paths(tree: RepoTree, globs: Sequence[str]) -> list[str]:
