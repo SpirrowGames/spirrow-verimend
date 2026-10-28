@@ -427,6 +427,14 @@ def _strip_eol(line: str) -> str:
 
 @dataclass
 class MendPass:
+    """What one ``mend_stale`` call did -- its return value, for the caller.
+
+    Every field counts this pass only. ``drafted`` is the drafts this pass wrote;
+    ``stats.mend.drafted`` is a different number, the run's total counted from the
+    table (``_record``), so it stays true across re-runs. The other ``stats.mend``
+    keys are this pass's, copied from here.
+    """
+
     drafted: int = 0
     rejected: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REJECT_REASONS, 0))
     skipped: dict[str, int] = field(default_factory=lambda: dict.fromkeys(SKIP_REASONS, 0))
