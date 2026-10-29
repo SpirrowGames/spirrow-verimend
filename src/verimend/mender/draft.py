@@ -78,14 +78,17 @@ from verimend.extractor.extract import Document
 from verimend.llm_policy import (
     ABORT_CONSECUTIVE,
     ABORT_PERMANENT_HTTP,
+    ABORT_PERMANENT_SCHEMA,
     ABORT_RETRY_AFTER,
     CONSECUTIVE_TRANSIENT_LIMIT,
+    ERROR_SCHEMA,
     ConfigStatus,
     Permanent,
     Streaks,
     Transient,
     Unwaitable,
     count_permanent,
+    count_schema,
     request,
 )
 
@@ -97,7 +100,6 @@ RUNAWAY_FACTOR = 3
 RUNAWAY_MIN_LINES = 10
 OUTPUT_KEYS = frozenset({"lines"})
 
-ERROR_SCHEMA = "schema"
 
 REJECT_EMPTY = "empty"
 REJECT_NO_CHANGE = "no_change"
@@ -258,8 +260,11 @@ class MenderSession:
             log.error("verdict %s: %s", target.verdict_id, exc.error)
             if count_permanent(self.streaks, exc):
                 self._abort(ABORT_PERMANENT_HTTP, target.verdict_id, status=exc.status, cause=exc)
+            elif count_schema(self.streaks, exc):
+                self._abort(ABORT_PERMANENT_SCHEMA, target.verdict_id, cause=exc)
             return VerdictFailure(target.verdict_id, exc.error)
         self.streaks.transient = 0
+        self.streaks.permanent_schema = 0  # a well-formed response; see Streaks
         rejection = check_replacement(target.anchor_lines, lines)
         if rejection is not None:
             log.warning("verdict %s: draft rejected (%s)", target.verdict_id, rejection)

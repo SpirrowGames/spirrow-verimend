@@ -441,6 +441,71 @@ def test_an_abort_with_no_cause_keeps_the_implicit_context(conn) -> None:
     assert info.value.__cause__ is None and isinstance(info.value.__context__, ValueError)
 
 
+# ------------------------------------------- permanent schema streak (msg-203)
+
+BAD = ("not json", '{"lines": "x"}')  # one verdict whose draft stays malformed after the correction
+GOOD = lines("The service listens on port 8120.")
+
+
+def _many(conn, n: int) -> tuple[int, list[int]]:
+    run = _run(conn)
+    fact = _fact(conn, run)
+    return run, [_stale(conn, run, (a, a), fact_ids=[fact]) for a in (6, 7, 9, 11, 12)[:n]]
+
+
+def test_three_schema_failures_in_a_row_abort_with_their_own_reason(conn) -> None:
+    run, verdicts = _many(conn, 4)
+    client = FakeClient(*BAD, *BAD, *BAD, GOOD)
+    passed = mend_stale(conn, run, _docs(), _mender(client))
+    assert len(client.calls) == 6 and passed.not_sent == 1  # verdict 4 is never sent
+    stats = _mend_stats(conn, run)
+    assert stats["aborted"] == {"reason": "permanent_schema_streak", "at_verdict": verdicts[2]}  # no status
+    assert [f["error"] for f in stats["failed"]] == ["schema"] * 3
+
+
+def test_strict_schema_streak_chains_the_third_failure(conn) -> None:
+    from verimend.llm_policy import Permanent
+
+    run, verdicts = _three(conn)
+    with pytest.raises(MenderAborted) as info:
+        mend_stale(conn, run, _docs(), _mender(FakeClient(*BAD, *BAD, *BAD), strict=True))
+    assert info.value.detail == {"reason": "permanent_schema_streak", "at_verdict": verdicts[2]}
+    assert isinstance(info.value.__cause__, Permanent) and info.value.__cause__.error == "schema"
+
+
+def test_a_well_formed_draft_resets_the_schema_streak(conn) -> None:
+    run, verdicts = _many(conn, 4)
+    client = FakeClient(*BAD, GOOD, *BAD, *BAD)
+    passed = mend_stale(conn, run, _docs(), _mender(client))
+    assert "aborted" not in _mend_stats(conn, run) and passed.drafted == 1 and len(passed.failures) == 3
+
+
+def test_a_rejected_but_well_formed_draft_also_resets_the_schema_streak(conn) -> None:
+    run, verdicts = _many(conn, 4)
+    client = FakeClient(*BAD, lines(), *BAD, *BAD)  # empty: rejected, yet the output followed the schema
+    mend_stale(conn, run, _docs(), _mender(client))
+    assert "aborted" not in _mend_stats(conn, run)
+
+
+def test_an_http_4xx_does_not_reset_the_schema_streak(conn) -> None:
+    run, verdicts = _many(conn, 5)
+    client = FakeClient(*BAD, http(400), *BAD, *BAD)
+    passed = mend_stale(conn, run, _docs(), _mender(client))
+    stats = _mend_stats(conn, run)
+    assert stats["aborted"] == {"reason": "permanent_schema_streak", "at_verdict": verdicts[3]}
+    assert [f["error"] for f in stats["failed"]] == ["schema", "http_400", "schema", "schema"]
+    assert passed.not_sent == 1
+
+
+def test_a_schema_failure_resets_the_http_streak_and_does_not_abort_it(conn) -> None:
+    run, verdicts = _many(conn, 4)
+    client = FakeClient(http(400), *BAD, http(400), http(400))
+    mend_stale(conn, run, _docs(), _mender(client))
+    stats = _mend_stats(conn, run)
+    assert "aborted" not in stats
+    assert [f["error"] for f in stats["failed"]] == ["http_400", "schema", "http_400", "http_400"]
+
+
 def test_drafts_written_before_an_abort_stay(conn) -> None:
     run, verdicts = _three(conn)
     client = FakeClient(lines("The service listens on port 8120."), http(429, "600"))

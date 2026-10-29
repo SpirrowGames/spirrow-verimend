@@ -22,7 +22,12 @@ permanent           any other 4xx                    none                ``Perma
 tier) does not exist, which no request body can fix.
 
 What a stage does with each class -- fail the unit, count it, abort -- is the
-stage's own business; ``Streaks`` holds the two counters both stages abort on.
+stage's own business; ``Streaks`` holds the counters every stage aborts on.
+
+A response that came back 2xx but stayed malformed after the one correction
+request is raised by the stage as ``Permanent(ERROR_SCHEMA)`` (no status).
+It is counted by ``count_schema`` on its own streak, never by
+``count_permanent``: the two abort reasons name different causes.
 """
 
 from __future__ import annotations
@@ -36,13 +41,16 @@ if TYPE_CHECKING:  # imported lazily below: verimend.extractor imports this modu
 
 CONSECUTIVE_TRANSIENT_LIMIT = 3
 PERMANENT_HTTP_STREAK_LIMIT = 3
+PERMANENT_SCHEMA_STREAK_LIMIT = 3
 DEFAULT_WAIT_S = 2.0
 
 ERROR_TRANSPORT = "transport"
+ERROR_SCHEMA = "schema"
 
 ABORT_CONSECUTIVE = "consecutive_transient_failures"
 ABORT_RETRY_AFTER = "retry_after_exceeds_max"
 ABORT_PERMANENT_HTTP = "permanent_http_streak"
+ABORT_PERMANENT_SCHEMA = "permanent_schema_streak"
 
 _TRANSIENT_STATUSES = frozenset({408, 429})
 _RETRY_AFTER_STATUSES = frozenset({429, 503})
@@ -82,7 +90,7 @@ class Permanent(Exception):
 
 @dataclass
 class Streaks:
-    """The two cross-unit counters a stage aborts on.
+    """The three cross-unit counters a stage aborts on.
 
     ``transient``: units (chunks / claims) that failed transiently in a row;
     the stage resets it when a unit succeeds.
@@ -94,10 +102,20 @@ class Streaks:
     Three 4xx in a row with a correct setup mean the request building or the
     configuration (an unknown tier answered with 400, say) is broken, and
     every further request would fail the same way.
+
+    ``permanent_schema``: units in a row whose response stayed malformed after
+    the correction request (``Permanent(ERROR_SCHEMA)``). Each one costs two
+    billed 2xx calls, so a broken prompt or a degraded model would otherwise
+    run through every unit. The stage resets it only when a unit's response
+    was well-formed (its ``_ask`` returned); a transient failure, an HTTP 4xx
+    or an input-side failure (``oversized_line``) in between neither resets
+    nor counts it -- none of them shows the output is well-formed again. It is
+    independent of ``permanent_http``: a malformed 2xx resets that one.
     """
 
     transient: int = 0
     permanent_http: int = 0
+    permanent_schema: int = 0
 
 
 def request(
@@ -153,6 +171,14 @@ def count_permanent(streaks: Streaks, exc: Permanent) -> bool:
         return False
     streaks.permanent_http += 1
     return streaks.permanent_http >= PERMANENT_HTTP_STREAK_LIMIT
+
+
+def count_schema(streaks: Streaks, exc: Permanent) -> bool:
+    """Count ``exc`` if it is a ``schema`` failure. True when the streak reached the abort limit."""
+    if exc.error != ERROR_SCHEMA:
+        return False
+    streaks.permanent_schema += 1
+    return streaks.permanent_schema >= PERMANENT_SCHEMA_STREAK_LIMIT
 
 
 def parse_retry_after(value: str | None) -> int | None:

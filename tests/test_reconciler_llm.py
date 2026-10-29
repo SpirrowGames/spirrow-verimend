@@ -313,6 +313,59 @@ def test_schema_failures_are_not_in_the_permanent_streak(conn) -> None:
     assert [f["error"] for f in stats["llm_failed"]] == ["http_400", "schema", "schema", "http_400"]
 
 
+# ------------------------------------------- permanent schema streak (msg-203)
+
+BAD = ("x", "y")  # one claim whose judgement stays malformed after the correction request
+
+
+def test_three_schema_failures_in_a_row_abort_with_their_own_reason(conn) -> None:
+    run, fact, claims = _setup(conn, 4)
+    client = FakeClient(*BAD, *BAD, *BAD, answer("verified", [fact]))
+    _both_stages(conn, run, _judge(client))
+    assert len(client.calls) == 6  # claim 4 is never sent
+    stats = _stats(conn, run)
+    assert stats["llm_aborted"] == {"reason": "permanent_schema_streak", "at_claim": claims[2]}  # no status
+    assert [f["error"] for f in stats["llm_failed"]] == ["schema"] * 3
+
+
+def test_strict_schema_streak_chains_the_third_failure(conn) -> None:
+    from verimend.llm_policy import Permanent
+
+    run, fact, claims = _setup(conn, 3)
+    with pytest.raises(JudgeAborted) as info:
+        _both_stages(conn, run, _judge(FakeClient(*BAD, *BAD, *BAD), strict=True))
+    assert info.value.reason == "permanent_schema_streak"
+    assert set(info.value.detail) == {"reason", "at_claim"}
+    assert isinstance(info.value.__cause__, Permanent) and info.value.__cause__.error == "schema"
+
+
+def test_a_well_formed_judgement_resets_the_schema_streak(conn) -> None:
+    run, fact, claims = _setup(conn, 4)
+    client = FakeClient(*BAD, answer("verified", [fact]), *BAD, *BAD)
+    _both_stages(conn, run, _judge(client))
+    stats = _stats(conn, run)
+    assert "llm_aborted" not in stats and len(client.calls) == 7
+
+
+def test_an_http_4xx_does_not_reset_the_schema_streak(conn) -> None:
+    run, fact, claims = _setup(conn, 5)
+    client = FakeClient(*BAD, http(400), *BAD, *BAD)
+    _both_stages(conn, run, _judge(client))
+    stats = _stats(conn, run)
+    assert stats["llm_aborted"] == {"reason": "permanent_schema_streak", "at_claim": claims[3]}
+    assert [f["error"] for f in stats["llm_failed"]] == ["schema", "http_400", "schema", "schema"]
+    assert len(client.calls) == 7  # claim 5 is never sent
+
+
+def test_a_schema_failure_resets_the_http_streak_and_does_not_abort_it(conn) -> None:
+    run, fact, claims = _setup(conn, 4)
+    client = FakeClient(http(400), *BAD, http(400), http(400))
+    _both_stages(conn, run, _judge(client))
+    stats = _stats(conn, run)
+    assert "llm_aborted" not in stats
+    assert [f["error"] for f in stats["llm_failed"]] == ["http_400", "schema", "http_400", "http_400"]
+
+
 # ------------------------------------------------------------- strict (eval)
 
 

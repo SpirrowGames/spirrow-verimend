@@ -315,6 +315,17 @@ def test_a_mender_failure_makes_the_run_partial_and_keeps_the_verdicts(db, sourc
     assert stats["mend"]["aborted"]["reason"] == "permanent_http_streak"
 
 
+def test_a_mender_schema_streak_makes_the_run_partial_with_its_own_reason(db, source) -> None:
+    mender_client = FakeClient(*["not json", "still not json"] * 3)
+    _, status, stats, _, verdicts, _ = _run(
+        db, source, lambda: session(FakeClient(by_chunk=_historical_on_line_3))[0],
+        lambda: _judge(StaleJudge()), lambda: _mender(mender_client),
+    )
+    assert status == "partial" and verdicts == ["stale"] * 3
+    assert stats["mend"]["aborted"]["reason"] == "permanent_schema_streak"
+    assert "status" not in stats["mend"]["aborted"]
+
+
 def test_an_unbuildable_mender_is_a_config_error_and_the_run_partial(db, source) -> None:
     def no_url():
         raise MenderConfigError("lexora_url_unset")
