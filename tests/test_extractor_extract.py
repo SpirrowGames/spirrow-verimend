@@ -188,6 +188,68 @@ def test_strict_raises_on_a_permanent_http_streak() -> None:
     assert info.value.reason == "permanent_http_streak"
 
 
+# ------------------------------------------------ permanent schema streak (msg-203)
+
+BAD = ("x", "y")  # one chunk whose output stays malformed after the correction request
+
+
+def test_three_schema_failures_in_a_row_abort_with_their_own_reason() -> None:
+    client = FakeClient(*BAD, *BAD, *BAD, "[]")
+    s, _ = session(client)
+    result = s.extract(FOUR)
+    assert [f.error for f in result.failures] == ["schema"] * 3 + ["extractor_aborted"]
+    assert len(client.calls) == 6  # chunk 4 is never sent
+    assert s.aborted == {
+        "reason": "permanent_schema_streak",
+        "at_chunk": {"doc_repo": "o/r", "doc_path": "README.md", "lines": [5, 6]},
+    }  # no status key: nothing answered with a 4xx
+
+
+def test_strict_schema_streak_chains_the_third_failure() -> None:
+    from verimend.llm_policy import Permanent
+
+    s, _ = session(FakeClient(*BAD, *BAD, *BAD), strict=True)
+    with pytest.raises(ExtractorAborted) as info:
+        s.extract(FOUR)
+    assert info.value.reason == "permanent_schema_streak"
+    assert "status" not in info.value.detail
+    assert isinstance(info.value.__cause__, Permanent) and info.value.__cause__.error == "schema"
+    assert len(s.client.calls) == 6
+
+
+def test_a_well_formed_response_resets_the_schema_streak() -> None:
+    client = FakeClient(*BAD, "[]", *BAD, *BAD)
+    s, _ = session(client)
+    result = s.extract(FOUR)
+    assert [f.error for f in result.failures] == ["schema"] * 3
+    assert s.aborted is None
+
+
+def test_an_http_4xx_does_not_reset_the_schema_streak() -> None:
+    client = FakeClient(*BAD, http(400), *BAD, *BAD)
+    s, _ = session(client)
+    result = s.extract(FOUR)
+    assert [f.error for f in result.failures] == ["schema", "http_400", "schema", "schema"]
+    assert s.aborted is not None and s.aborted["reason"] == "permanent_schema_streak"
+    assert "status" not in s.aborted and s.aborted["at_chunk"]["lines"] == [7, 8]
+
+
+def test_a_transient_failure_does_not_reset_the_schema_streak() -> None:
+    client = FakeClient(*BAD, *BAD, http(503), http(503), *BAD)
+    s, _ = session(client)
+    s.extract(FOUR)
+    assert s.aborted is not None and s.aborted["reason"] == "permanent_schema_streak"
+
+
+def test_a_schema_failure_resets_the_http_streak_and_is_counted_apart() -> None:
+    client = FakeClient(http(400), *BAD, http(400), http(400))
+    s, _ = session(client)
+    result = s.extract(FOUR)
+    assert [f.error for f in result.failures] == ["http_400", "schema", "http_400", "http_400"]
+    assert s.aborted is None
+    assert (s.streaks.permanent_http, s.streaks.permanent_schema) == (2, 1)
+
+
 # ------------------------------------------------ transient HTTP errors
 
 

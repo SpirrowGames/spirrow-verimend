@@ -69,16 +69,19 @@ from verimend.extractor.client import LLMClient
 from verimend.llm_policy import (  # noqa: F401 -- several are re-exported for callers and tests
     ABORT_CONSECUTIVE,
     ABORT_PERMANENT_HTTP,
+    ABORT_PERMANENT_SCHEMA,
     ABORT_RETRY_AFTER,
     CONSECUTIVE_TRANSIENT_LIMIT,
     DEFAULT_WAIT_S,
     ERROR_TRANSPORT,
+    ERROR_SCHEMA,
     ConfigStatus,
     Permanent,
     Streaks,
     Transient,
     Unwaitable,
     count_permanent,
+    count_schema,
     parse_retry_after,
     request,
 )
@@ -90,7 +93,6 @@ log = logging.getLogger(__name__)
 OUTPUT_SCHEMA_VERSION = 1
 OUTPUT_KEYS = frozenset({"anchor_start", "anchor_end", "text", "claim_type", "subject"})
 
-ERROR_SCHEMA = "schema"
 ERROR_OVERSIZED = "oversized_line"
 ERROR_ABORTED = "extractor_aborted"
 
@@ -267,8 +269,11 @@ class ExtractionSession:
             fail(exc.error)
             if count_permanent(self.streaks, exc):
                 self._abort(ABORT_PERMANENT_HTTP, at_chunk, status=exc.status, cause=exc)
+            elif count_schema(self.streaks, exc):
+                self._abort(ABORT_PERMANENT_SCHEMA, at_chunk, cause=exc)
             return
         self.streaks.transient = 0
+        self.streaks.permanent_schema = 0  # a well-formed response; see Streaks
         result.claims.extend(claims)
 
     def _abort(

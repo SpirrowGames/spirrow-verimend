@@ -78,14 +78,17 @@ from verimend.extractor.client import LexoraClient, LLMClient
 from verimend.llm_policy import (
     ABORT_CONSECUTIVE,
     ABORT_PERMANENT_HTTP,
+    ABORT_PERMANENT_SCHEMA,
     ABORT_RETRY_AFTER,
     CONSECUTIVE_TRANSIENT_LIMIT,
+    ERROR_SCHEMA,
     ConfigStatus,
     Permanent,
     Streaks,
     Transient,
     Unwaitable,
     count_permanent,
+    count_schema,
     request,
 )
 from verimend.reconciler.retrieval import FactDoc, query_tokens, search
@@ -97,7 +100,6 @@ REASON_MAX = 300
 RESULTS = frozenset({"verified", "stale", "unverifiable"})
 OUTPUT_KEYS = frozenset({"result", "fact_ids", "reason"})
 
-ERROR_SCHEMA = "schema"
 NO_CANDIDATES = "no_candidate_facts"
 
 
@@ -227,8 +229,11 @@ class JudgeSession:
             log.error("claim %s: %s", claim.id, exc.error)
             if count_permanent(self.streaks, exc):
                 self._abort(ABORT_PERMANENT_HTTP, claim.id, status=exc.status, cause=exc)
+            elif count_schema(self.streaks, exc):
+                self._abort(ABORT_PERMANENT_SCHEMA, claim.id, cause=exc)
             return ClaimFailure(claim.id, exc.error)
         self.streaks.transient = 0
+        self.streaks.permanent_schema = 0  # a well-formed response; see Streaks
         return _guard(parsed, candidates, self.tier, claim.id)
 
     def _abort(self, reason: str, at_claim: int, *, cause: BaseException | None = None, **extra: Any) -> None:
