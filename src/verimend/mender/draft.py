@@ -1,8 +1,8 @@
 """The mender's first stage (docs/design.md 5.4, M3a): a patch draft for each stale verdict.
 
 ``mend_stale(conn, run_id, documents, mender)`` runs after the reconciler. It
-writes ``verdict.patch_draft`` and nothing else: no branch, no pull request,
-no chatroom post (those are M3b). Every effect stays in the local database.
+writes ``verdict.patch_draft`` and nothing else: branches and pull requests are
+``verimend.mender.publish`` (M3b). Every effect stays in the local database.
 
 Targets: the run's verdicts with ``result = stale`` and ``patch_draft IS NULL``,
 in verdict id order -- deterministic and LLM stales alike (an LLM stale with
@@ -38,7 +38,7 @@ rejected" holds by construction. The draft is rejected (no ``patch_draft``,
 counted in ``stats.mend.rejected``) when the replacement is
 
 - ``empty``: no lines, or only blank ones;
-- ``no_change``: the same lines as the anchor range;
+- ``no_change``: the same lines as the anchor range, ignoring trailing whitespace;
 - ``runaway``: more than ``max(3 * anchor lines, 10)`` lines.
 
 A draft is written and committed per verdict, so whatever stops the stage
@@ -356,7 +356,7 @@ def check_replacement(original: Sequence[str], replacement: Sequence[str]) -> st
     """The rejection reason for ``replacement`` of the anchor lines ``original``, or None."""
     if not any(line.strip() for line in replacement):
         return REJECT_EMPTY
-    if list(replacement) == list(original):
+    if [line.rstrip() for line in replacement] == [line.rstrip() for line in original]:
         return REJECT_NO_CHANGE
     if len(replacement) > max(RUNAWAY_FACTOR * len(original), RUNAWAY_MIN_LINES):
         return REJECT_RUNAWAY
@@ -557,7 +557,7 @@ def _facts(conn: sqlite3.Connection, run_id: int, ids: Sequence[int]) -> list[Ev
 
 
 def _record(conn: sqlite3.Connection, run_id: int, passed: MendPass, mender: MenderSession) -> None:
-    """``stats.mend``: the run's drafts counted from the table, plus this pass's outcomes and stop."""
+    """``stats.mend``: the run's drafts counted from the table, this pass's outcomes and stop, and the run's PRs."""
     (drafted,) = conn.execute(
         """
         SELECT count(*) FROM verdict AS v JOIN claim AS c ON c.id = v.claim_id
@@ -578,10 +578,19 @@ def _record(conn: sqlite3.Connection, run_id: int, passed: MendPass, mender: Men
         mend["aborted"] = mender.aborted
     if mender.config_error is not None:
         mend["config_error"] = mender.config_error
+    if "prs" in stats.get("mend", {}):
+        mend["prs"] = stats["mend"]["prs"]  # the idempotency record of what is already published
     stats["mend"] = mend
     conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))
 
 
 def mend_stage_failed(mend_stats: dict[str, Any]) -> bool:
-    """True when the mender left work undone through Lexora: a verdict failure, an abort or a config error."""
-    return bool(mend_stats.get("failed")) or "aborted" in mend_stats or "config_error" in mend_stats
+    """True when the mender left work undone: a verdict failure, an abort, a config error or an unpublished repository."""
+    return (
+        bool(mend_stats.get("failed"))
+        or "aborted" in mend_stats
+        or "config_error" in mend_stats
+        or any(
+            "publish_error" in pr or pr.get("reason") == "no_base_commit" for pr in mend_stats.get("prs", {}).values()
+        )
+    )

@@ -11,6 +11,7 @@ sets ``WorkingDirectory`` or passes absolute paths via the environment.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -51,8 +52,18 @@ class Settings(BaseSettings):
     # The Lexora tier the mender asks for its patch drafts (docs/design.md 6:
     # Heavy -- few calls, quality first). Empty is rejected like reconciler_tier.
     mender_tier: str = "heavy"
+    # What the mender does with its drafts (docs/design.md 5.4). ``dry_run`` makes
+    # the local branch and commit and writes the PR body under mend_artefact_dir;
+    # only ``github`` pushes and opens a pull request.
+    mend_publish: Literal["dry_run", "github"] = "dry_run"
+    mend_artefact_dir: Path = Path("var/mend")
+    # The author of the commits the mender makes. Empty is rejected.
+    git_author_name: str = "verimend"
+    git_author_email: str = "verimend@spirrow.invalid"
+    # The GitHub CLI the mender runs in ``github`` mode.
+    gh_bin: str = "gh"
 
-    @field_validator("reconciler_tier", "mender_tier")
+    @field_validator("reconciler_tier", "mender_tier", "git_author_name", "git_author_email")
     @classmethod
     def _tier_not_empty(cls, value: str, info) -> str:
         if not value.strip():

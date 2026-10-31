@@ -92,6 +92,11 @@ class Target(BaseModel):
         default_factory=dict,
         description="Fact extractor enable/disable flags. Omitted extractors are disabled.",
     )
+    pr_base: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Branch the mender's pull requests target. Omitted means the repository's default branch.",
+    )
 
     @field_validator("doc_globs")
     @classmethod
