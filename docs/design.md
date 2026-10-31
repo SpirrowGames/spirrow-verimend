@@ -62,6 +62,8 @@ verdict(id, claim_id, result, method, evidence_json, patch_draft)
 metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 ```
 
+`crawl_run.pr_url` は 1 列で 1 つの URL しか持てず、1 つの run が複数のリポジトリに PR を立てる形を表せないため、v1 では書き込まず NULL のままとする。run の PR の正本は `stats_json.mend.prs`（`doc_repo` をキーにした辞書、5.4）。
+
 同一ドキュメントのクレームは content_hash で前回実行と突合し、未変更なら抽出をスキップ（増分クロール）。
 
 - `subject_json`（M2a で追加）: extractor が文脈を読んだうえで出力する、クレームの構造化 subject。NULL 可。スキーマの正本は `verimend/claims.py`（Pydantic、strict・未知キー禁止）。extractor の出力スキーマと T05 の正解ラベルはこれに揃える
@@ -167,10 +169,21 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 - stale のみパッチ草案を生成。アンカー範囲外の変更は生成しても棄却（diff の暴走防止）
   - M3a（`verimend/mender/draft.py`）: その run の `result = stale` かつ `patch_draft IS NULL` の verdict に草案を書く（再実行で作り直さない）。LLM（`VERIMEND_MENDER_TIER`、既定 `heavy`）が返すのはアンカー範囲を置き換える行 `{"lines": [...]}` だけで、unified diff は verimend が計算する。範囲外の変更は作り方の上で表現できない
   - 呼ぶ前の確認（満たさなければ LLM を呼ばず `stats_json.mend.skipped` に理由ごとに数える）: `no_evidence`（`evidence_json.fact_ids` が空でない整数のリストで、全部その run のファクト）、`doc_changed`（extractor が読んだ本文の SHA-256 がその run の `document.content_hash` と一致）、`no_anchor`（アンカーが文書の中）
-  - 棄却（`stats_json.mend.rejected`）: `empty`（空・空白だけ）、`no_change`（元の行と同じ）、`runaway`（元の行数の 3 倍と 10 行の大きい方を超える）
+  - 棄却（`stats_json.mend.rejected`）: `empty`（空・空白だけ）、`no_change`（元の行と同じ。各行の末尾の空白は無視する）、`runaway`（元の行数の 3 倍と 10 行の大きい方を超える）
   - Lexora の失敗は 5.3 の LLM 段と同じ区分で、単位は verdict。どの失敗も run を `partial` にする。`schema` の連続 3 回は 5.2 と同じく `permanent_schema_streak`（`status` 無し）で打ち切る（形は正しいが棄却された草案は「形が正しい」ので数を戻す）。`stats_json.mend.aborted = {reason, at_verdict[, retry_after_s][, status]}`、`config_error = {status, at_verdict}`
 - ブランチ: `verimend/YYYY-MM-DD`。1クロール1PR、対象リポジトリごと
 - PR本文: 「決定的検証済み」「LLM判定」の2セクション。各項目にクレーム原文・根拠・判定方法を記載
+- 実装メモ（M3b: `verimend/mender/publish.py`。`verimend run` は mender の後に実行し、`verimend publish --run <id>` で同じ run をやり直せる。LLM は呼ばない）:
+  - 公開の切り替え: `VERIMEND_MEND_PUBLISH` = `dry_run`（既定）| `github`。push と `gh pr create`（`VERIMEND_GH_BIN`）を実行するのは `github` だけ。`dry_run` もローカルのブランチと commit までは同じ経路を通り、本文を `VERIMEND_MEND_ARTEFACT_DIR` 配下に書く（commit は作業ディレクトリごと消える）
+  - 記録: `stats_json.mend.prs[<doc_repo>]` = `{mode, branch, base_commit, url|null, applied, skipped[, body_path][, pushed][, publish_error]}`、または `{mode, reason[, skipped]}`。`applied` は verdict id のリスト、`skipped` は `[{verdict_id, reason: "apply_conflict"}]`。`reason` = `no_drafts` | `all_skipped` | `no_base_commit`。リポジトリごとに書いてそのたびに commit する
+  - ベースの commit: リポジトリごとに `stats.targets[<repo>].commit`。無ければ公開せず `no_base_commit`（default branch の先頭で代用しない。アンカーはその commit の行番号だから）
+  - 適用: run 専用の作業ディレクトリで、各草案がベースに対して厳密な `git apply --check` を通ることを先に確かめる。通らない草案と、アンカーが重なる草案（`doc_path`・開始行の降順で後になる方）は、その 1 件だけ `apply_conflict` で外す。残りを同じ順に適用する。隣の草案が文脈行を変えていても当たるよう、この適用は `-C0` で行う（文脈は先の確認で検証済み）
+  - ブランチ名の衝突: リモートに同名があれば `-r<run_id>` を付ける。force push はしない
+  - 失敗: push と PR 作成は 1 回だけ再試行する。`publish_error = {stage, detail}`（`stage` = `worktree` | `push` | `pr_create`）。`publish_error` と `no_base_commit` は run を `partial` にする。`publish` のやり直しで成功しても run の status は変えない（結果は `prs` に出る）
+  - 冪等: `url` が記録されたリポジトリは公開しない。push 済みで PR が無いリポジトリは、記録したブランチで PR 作成から再開する
+  - PR 本文は 60,000 文字で切り、切った分は「ほか N 件」と件数だけ書く。文書やファクト由来の文字列はコードスパンに入れる（メンションや Issue の自動クローズを起こさない）
+  - `pr_base`（`targets.yaml`）: PR のベースブランチ。省略時はリポジトリの default branch
+  - `VERIMEND_GIT_AUTHOR_NAME` / `VERIMEND_GIT_AUTHOR_EMAIL`: commit の author。空は Settings の検証で弾く
 - 自動適用（PRを経ない直接 commit）は v1 では実装しない。全修正が PR 経由。マージ率の実績が出た後、決定的検証済みカテゴリのみ v2 で検討
 - unverifiable と大規模乖離（同一ドキュメントで stale が閾値超え）は chatroom に1スレッドでまとめて投稿
 

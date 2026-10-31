@@ -21,6 +21,9 @@ How the run ends (design 5.2):
 - the mender (M3a, ``verimend.mender``) runs last, on the same documents; any
   Lexora failure of it -- a verdict failure, an abort, a configuration error
   -- makes the run ``partial`` the same way. Drafts already written stay.
+- ``publish`` (M3b, ``verimend.mender.publish``) runs after the mender. A
+  repository it could not publish makes the run ``partial``; what it has
+  recorded survives even an unexpected error.
 - any other error marks the run ``failed`` and propagates.
 """
 
@@ -71,6 +74,7 @@ def run_pipeline(
     health_source: HealthSource | None = None,
     make_judge: Callable[[], JudgeSession] | None = None,
     make_mender: Callable[[], MenderSession] | None = None,
+    publish: Callable[[sqlite3.Connection, int], Any] | None = None,
 ) -> PipelineResult:
     """Run every stage into one new crawl_run and return how it ended.
 
@@ -79,7 +83,8 @@ def run_pipeline(
     ``make_judge`` is called once, after the deterministic stage; without it
     the LLM stage does not run and undecided claims stay ``deferred``.
     ``make_mender`` is called once, after the reconciler; without it no patch
-    draft is written.
+    draft is written. ``publish`` is called once, after the mender, and only
+    when there is one.
     """
     run_id = start_run(conn)
     stats: dict[str, Any] = {"targets": {}}
@@ -113,12 +118,18 @@ def run_pipeline(
             _judge(conn, run_id, make_judge)
         if make_mender is not None:
             _mend(conn, run_id, documents, make_mender)
+            if publish is not None:
+                publish(conn, run_id)
         (stats_json,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
         stats = json.loads(stats_json)
         if llm_stage_failed(stats.get("reconcile", {})) or mend_stage_failed(stats.get("mend", {})):
             status = STATUS_PARTIAL
     except BaseException:
         conn.rollback()
+        # ``stats`` predates the mender. Its stored record says what is already published, and must survive.
+        (stored,) = conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run_id,)).fetchone()
+        if "mend" in json.loads(stored or "{}"):
+            stats["mend"] = json.loads(stored)["mend"]
         finish_run(conn, run_id, STATUS_FAILED, stats)
         raise
     finish_run(conn, run_id, status, stats)
