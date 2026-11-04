@@ -21,7 +21,12 @@ Per repository:
   applied by ``doc_path``, then anchor start descending, so a line number is still
   right when its draft's turn comes. That step uses ``-C0`` because a neighbouring
   draft may already have changed this one's context lines; the strict check has
-  already verified that context against the base.
+  already verified that context against the base. Verdicts of one group (the same
+  anchor and the same patch, drafted together by ``mend_stale``) are one draft here:
+  they are applied or skipped together, and every one of their ids is listed.
+- **Body.** The applied drafts, then ``## 適用しなかった修正案``: every verdict that is
+  not in the PR, with its ``file:line`` and why -- ``apply_conflict`` from above, or
+  ``structure`` from ``stats.mend.rejected_structure`` (the mender's last pass).
 - **Publish.** Only ``mode == "github"`` pushes and runs ``gh pr create``. ``dry_run``
   takes the same path up to the local commit, then writes the body to a file; the
   commit goes with the worktree. A push is never forced: a taken branch name gets
@@ -112,10 +117,30 @@ class PrItem:
 
 
 @dataclass(frozen=True)
-class _Draft:
+class NotApplied:
+    """A stale verdict whose draft is not in the PR, as the body's last section lists it."""
+
     verdict_id: int
+    doc_path: str
+    anchor: tuple[int, int]
+    reason: str  # apply_conflict | structure
+
+
+@dataclass(frozen=True)
+class _Draft:
+    """One patch: a verdict's, or the one patch a group of verdicts on the same anchor shares."""
+
+    verdict_ids: tuple[int, ...]
     patch: str
-    item: PrItem
+    items: tuple[PrItem, ...]
+
+    @property
+    def verdict_id(self) -> int:
+        return self.verdict_ids[0]
+
+    @property
+    def item(self) -> PrItem:
+        return self.items[0]
 
 
 class _StageError(Exception):
@@ -128,15 +153,31 @@ class _StageError(Exception):
 # ----------------------------------------------------------------- PR body
 
 
-def build_pr_body(items: Sequence[PrItem], *, run_id: int, base_commit: str, limit: int = BODY_MAX_CHARS) -> str:
+def build_pr_body(
+    items: Sequence[PrItem],
+    *,
+    run_id: int,
+    base_commit: str,
+    not_applied: Sequence[NotApplied] = (),
+    limit: int = BODY_MAX_CHARS,
+) -> str:
     """The PR body: pure, at most ``limit`` characters, whatever does not fit counted as ``ほか N 件``.
+
+    Items with the same document, anchor and method (one patch drafted for several
+    verdicts) are one entry listing every claim. ``not_applied`` is the last section,
+    ``適用しなかった修正案``, present only when it has entries; it gets its room first,
+    up to half of ``limit``.
 
     Text taken from a document or a fact goes in code spans, so a mention, an issue
     reference or a closing keyword inside it has no effect on GitHub.
     """
+    tail = _render_not_applied(not_applied, limit // 2)
+    limit -= len(tail)
+    entries: dict[tuple[str, tuple[int, int], str], list[PrItem]] = {}
+    for item in items:
+        entries.setdefault((item.doc_path, item.anchor, item.method), []).append(item)
     ordered = {
-        method: sorted((i for i in items if i.method == method), key=lambda i: (i.doc_path, i.anchor))
-        for method, _ in SECTIONS
+        method: [entries[key] for key in sorted(k for k in entries if k[2] == method)] for method, _ in SECTIONS
     }
     total = sum(len(group) for group in ordered.values())
     used = f"Verimend run {run_id} (base `{base_commit}`) が検出した stale な記述の修正案です。"
@@ -149,8 +190,8 @@ def build_pr_body(items: Sequence[PrItem], *, run_id: int, base_commit: str, lim
         empty = "\nなし"
         lines: list[str] = []
         length += len(heading) + len(empty)  # kept reserved even if the section turns out non-empty
-        for item in ordered[method]:
-            entry = _render_item(item)
+        for group in ordered[method]:
+            entry = _render_item(group)
             if length + len(entry) + reserve > limit:
                 continue
             lines.append(entry)
@@ -159,6 +200,7 @@ def build_pr_body(items: Sequence[PrItem], *, run_id: int, base_commit: str, lim
         parts.append(heading + ("".join(lines) if lines else empty))
     if included < total:
         parts.append(_omitted(total - included))
+    parts.append(tail)
     return "".join(parts)
 
 
@@ -166,13 +208,40 @@ def _omitted(count: int) -> str:
     return f"\n\nほか {count} 件"
 
 
-def _render_item(item: PrItem) -> str:
-    start, end = item.anchor
-    where = f"{item.doc_path}:{start}" if start == end else f"{item.doc_path}:{start}-{end}"
-    out = [f"\n- {_code(where)}\n  - クレーム: {_code(item.claim_text)}"]
-    out += [f"\n  - 根拠: {_code(e.source_ref)} {_code(e.summary)}" for e in item.evidence]
-    out.append(f"\n  - 判定方法: {item.method}")
+def _where(doc_path: str, anchor: tuple[int, int]) -> str:
+    start, end = anchor
+    return f"{doc_path}:{start}" if start == end else f"{doc_path}:{start}-{end}"
+
+
+def _render_item(group: Sequence[PrItem]) -> str:
+    first = group[0]
+    out = [f"\n- {_code(_where(first.doc_path, first.anchor))}"]
+    out += [f"\n  - クレーム: {_code(item.claim_text)}" for item in group]
+    evidence = list(dict.fromkeys(e for item in group for e in item.evidence))
+    out += [f"\n  - 根拠: {_code(e.source_ref)} {_code(e.summary)}" for e in evidence]
+    out.append(f"\n  - 判定方法: {first.method}")
     return "".join(out)
+
+
+def _render_not_applied(entries: Sequence[NotApplied], room: int) -> str:
+    """The ``適用しなかった修正案`` section, at most ``room`` characters; empty without entries."""
+    if not entries:
+        return ""
+    ordered = sorted(entries, key=lambda e: (e.doc_path, e.anchor, e.verdict_id))
+    heading = "\n\n## 適用しなかった修正案\n"
+    reserve = len(_omitted(len(ordered)))
+    lines: list[str] = []
+    length = len(heading)
+    for entry in ordered:
+        line = f"\n- verdict {entry.verdict_id}: {_code(_where(entry.doc_path, entry.anchor))} ({entry.reason})"
+        if length + len(line) + reserve > room:
+            break
+        lines.append(line)
+        length += len(line)
+    out = heading + "".join(lines)
+    if len(lines) < len(ordered):
+        out += _omitted(len(ordered) - len(lines))
+    return out
 
 
 def _code(text: str) -> str:
@@ -195,6 +264,7 @@ def publish_prs(conn: sqlite3.Connection, run_id: int, config: PublishConfig) ->
     started_at, stats = _run_row(conn, run_id)
     targets = stats.get("targets", {})
     drafts = _drafts(conn, run_id)
+    rejected = _rejected_structure(conn, run_id, stats.get("mend", {}).get("rejected_structure", []))
     for repo in sorted(set(targets) | set(drafts)):
         prior = _run_row(conn, run_id)[1].get("mend", {}).get("prs", {}).get(repo, {})
         if prior.get("url"):
@@ -204,7 +274,9 @@ def publish_prs(conn: sqlite3.Connection, run_id: int, config: PublishConfig) ->
             # Its record is what lets a github run finish the PR; a dry run must not replace it.
             log.info("%s: branch %s is pushed but has no PR; left for a github run", repo, prior.get("branch"))
             continue
-        record = _publish_repo(run_id, started_at, repo, targets.get(repo, {}), drafts.get(repo, []), prior, config)
+        record = _publish_repo(
+            run_id, started_at, repo, targets.get(repo, {}), drafts.get(repo, []), rejected.get(repo, []), prior, config
+        )
         _record(conn, run_id, repo, record)
     return _run_row(conn, run_id)[1].get("mend", {}).get("prs", {})
 
@@ -215,6 +287,7 @@ def _publish_repo(
     repo: str,
     target: Mapping[str, Any],
     drafts: Sequence[_Draft],
+    rejected: Sequence[NotApplied],
     prior: Mapping[str, Any],
     config: PublishConfig,
 ) -> dict[str, Any]:
@@ -229,7 +302,9 @@ def _publish_repo(
         record.update(branch=prior["branch"], pushed=True)
     try:
         with tempfile.TemporaryDirectory(prefix="verimend-mend-") as tmp:
-            _publish_in_worktree(Path(tmp) / "repo", run_id, started_at, repo, base_commit, drafts, record, config)
+            _publish_in_worktree(
+                Path(tmp) / "repo", run_id, started_at, repo, base_commit, drafts, rejected, record, config
+            )
     except _StageError as exc:
         log.error("%s: publishing failed at %s: %s", repo, exc.stage, exc.detail)
         record["publish_error"] = {"stage": exc.stage, "detail": exc.detail}
@@ -243,6 +318,7 @@ def _publish_in_worktree(
     repo: str,
     base_commit: str,
     drafts: Sequence[_Draft],
+    rejected: Sequence[NotApplied],
     record: dict[str, Any],
     config: PublishConfig,
 ) -> None:
@@ -255,13 +331,18 @@ def _publish_in_worktree(
         git("fetch", "-q", "--depth", "1", "--no-tags", "origin", base_commit)
         git("checkout", "-q", "--detach", "FETCH_HEAD")
         applied, skipped = _apply(git, drafts)
-        record.update(applied=[d.verdict_id for d in applied], skipped=skipped)
+        record.update(applied=[i for d in applied for i in d.verdict_ids], skipped=skipped)
         if not applied:
             record.clear()
             record.update(mode=config.mode, reason=REASON_ALL_SKIPPED, skipped=skipped)
             return
-        items = [d.item for d in applied]
-        body = build_pr_body(items, run_id=run_id, base_commit=base_commit)
+        items = [item for d in applied for item in d.items]
+        by_id = {i: d.item for d in drafts for i in d.verdict_ids}
+        not_applied = [
+            NotApplied(s["verdict_id"], by_id[s["verdict_id"]].doc_path, by_id[s["verdict_id"]].anchor, s["reason"])
+            for s in skipped
+        ] + list(rejected)
+        body = build_pr_body(items, run_id=run_id, base_commit=base_commit, not_applied=not_applied)
         pr_base = config.pr_bases.get(repo) or _default_branch(git)
         if "branch" not in record:
             branch = f"verimend/{date}"
@@ -294,8 +375,9 @@ def _apply(git: "_Git", drafts: Sequence[_Draft]) -> tuple[list[_Draft], list[di
     skipped: list[dict[str, Any]] = []
 
     def skip(draft: _Draft) -> None:
-        log.warning("verdict %s: %s", draft.verdict_id, SKIP_APPLY_CONFLICT)
-        skipped.append({"verdict_id": draft.verdict_id, "reason": SKIP_APPLY_CONFLICT})
+        for verdict_id in draft.verdict_ids:
+            log.warning("verdict %s: %s", verdict_id, SKIP_APPLY_CONFLICT)
+            skipped.append({"verdict_id": verdict_id, "reason": SKIP_APPLY_CONFLICT})
 
     clean = []
     for draft in order:  # against the untouched base: nothing is applied until this loop ends
@@ -423,10 +505,33 @@ def _drafts(conn: sqlite3.Connection, run_id: int) -> dict[str, list[_Draft]]:
         """,
         (run_id,),
     ).fetchall()
-    out: dict[str, list[_Draft]] = {}
+    # Verdicts sharing one anchor and one patch were drafted as a group (mend_stale): one draft here.
+    grouped: dict[tuple[str, str, int, int, str], list[tuple[int, PrItem]]] = {}
     for verdict_id, patch, method, evidence_json, repo, path, start, end, text in rows:
         item = PrItem(path, (start, end), text, method, _evidence(conn, run_id, evidence_json))
-        out.setdefault(repo, []).append(_Draft(verdict_id, patch, item))
+        grouped.setdefault((repo, path, start, end, patch), []).append((verdict_id, item))
+    out: dict[str, list[_Draft]] = {}
+    for (repo, *_, patch), members in grouped.items():
+        draft = _Draft(tuple(i for i, _ in members), patch, tuple(item for _, item in members))
+        out.setdefault(repo, []).append(draft)
+    return out
+
+
+def _rejected_structure(conn: sqlite3.Connection, run_id: int, ids: Sequence[int]) -> dict[str, list[NotApplied]]:
+    """The verdicts the mender's last pass rejected as ``structure``, per repository."""
+    out: dict[str, list[NotApplied]] = {}
+    for verdict_id in ids:
+        row = conn.execute(
+            """
+            SELECT c.doc_repo, c.doc_path, c.anchor_start, c.anchor_end
+            FROM verdict AS v JOIN claim AS c ON c.id = v.claim_id
+            WHERE v.id = ? AND c.run_id = ? AND v.patch_draft IS NULL
+            """,
+            (verdict_id, run_id),
+        ).fetchone()
+        if row is not None:
+            repo, path, start, end = row
+            out.setdefault(repo, []).append(NotApplied(verdict_id, path, (start, end), "structure"))
     return out
 
 

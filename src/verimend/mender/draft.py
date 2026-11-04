@@ -39,7 +39,19 @@ counted in ``stats.mend.rejected``) when the replacement is
 
 - ``empty``: no lines, or only blank ones;
 - ``no_change``: the same lines as the anchor range, ignoring trailing whitespace;
-- ``runaway``: more than ``max(3 * anchor lines, 10)`` lines.
+- ``runaway``: more than ``max(3 * anchor lines, 10)`` lines;
+- ``structure``: the diff breaks the Markdown around it (``check_structure``).
+  Its verdict ids are listed in ``stats.mend.rejected_structure`` so the PR
+  body can name what was left out.
+
+**Verdicts about the same lines are drafted together.** Stale verdicts whose
+``(doc_repo, doc_path, anchor_start, anchor_end)`` are exactly equal form one
+group: one Lexora call carries every claim of the group, and the one draft is
+written to every verdict of it. Only exact equality groups -- an anchor that
+merely overlaps another stays separate (publishing drops the loser as
+``apply_conflict``), so a group never covers more lines than one anchor. A
+group's outcome counts once per verdict in ``stats.mend`` (``drafted``,
+``rejected``, ``failed``, ``not_sent``).
 
 A draft is written and committed per verdict, so whatever stops the stage
 later keeps it.
@@ -65,6 +77,7 @@ import difflib
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import time
 from collections.abc import Callable, Sequence
@@ -104,7 +117,8 @@ OUTPUT_KEYS = frozenset({"lines"})
 REJECT_EMPTY = "empty"
 REJECT_NO_CHANGE = "no_change"
 REJECT_RUNAWAY = "runaway"
-REJECT_REASONS = (REJECT_EMPTY, REJECT_NO_CHANGE, REJECT_RUNAWAY)
+REJECT_STRUCTURE = "structure"
+REJECT_REASONS = (REJECT_EMPTY, REJECT_NO_CHANGE, REJECT_RUNAWAY, REJECT_STRUCTURE)
 
 SKIP_DOC_CHANGED = "doc_changed"
 SKIP_NO_EVIDENCE = "no_evidence"
@@ -228,15 +242,19 @@ class MenderSession:
     def stopped(self) -> bool:
         return self.aborted is not None or self.config_error is not None
 
-    def draft(self, target: StaleToMend) -> Draft | Rejected | VerdictFailure | None:
+    def draft(self, target: StaleToMend | Sequence[StaleToMend]) -> Draft | Rejected | VerdictFailure | None:
         """A draft, a rejection, a verdict failure, or None when the stage has stopped.
 
+        ``target`` is one verdict or a group with the same document and anchor (``group_targets``):
+        a group gets one call and one outcome, reported at its first verdict.
         Raises ``MenderConfigError`` / ``MenderAborted`` in strict mode.
         """
+        group = [target] if isinstance(target, StaleToMend) else list(target)
+        target = group[0]
         if self.stopped:
             return None
         try:
-            lines = self._ask(target)
+            lines = self._ask(group)
         except ConfigStatus as exc:
             log.error("verdict %s: mender configuration error %s; the stage stops", target.verdict_id, exc.error)
             if self.strict:
@@ -269,7 +287,12 @@ class MenderSession:
         if rejection is not None:
             log.warning("verdict %s: draft rejected (%s)", target.verdict_id, rejection)
             return Rejected(rejection)
-        return Draft(build_patch(target.doc_path, target.lines, target.anchor, lines))
+        patch = build_patch(target.doc_path, target.lines, target.anchor, lines)
+        broken = check_structure(patch)
+        if broken is not None:
+            log.warning("verdict %s: draft rejected (%s: %s)", target.verdict_id, REJECT_STRUCTURE, broken)
+            return Rejected(REJECT_STRUCTURE)
+        return Draft(patch)
 
     def _abort(self, reason: str, at_verdict: int, *, cause: BaseException | None = None, **extra: Any) -> None:
         """Stop the stage: ``{reason, at_verdict[, retry_after_s][, status]}``. Raises in strict mode.
@@ -285,10 +308,11 @@ class MenderSession:
             raise MenderAborted(reason, detail)
         self.aborted = detail
 
-    def _ask(self, target: StaleToMend) -> list[str]:
+    def _ask(self, group: Sequence[StaleToMend]) -> list[str]:
+        target = group[0]
         messages = [
             {"role": "system", "content": self.prompt},
-            {"role": "user", "content": render_target(target)},
+            {"role": "user", "content": render_target(group)},
         ]
         completion = self._request(messages)
         lines, errors = validate_draft(completion.text)
@@ -363,6 +387,116 @@ def check_replacement(original: Sequence[str], replacement: Sequence[str]) -> st
     return None
 
 
+def check_structure(patch: str) -> str | None:
+    """The structure rule (``rule1`` .. ``rule4``) the unified diff ``patch`` breaks, or None.
+
+    Read per hunk. In a removed run followed by an added run, lines are paired by
+    position (pairs where either side is blank are left out) for rules 1 and 2.
+
+    1. A rewritten line keeps its leading marks: indentation, ``>`` depth, list
+       marker kind and heading level (``_marks``).
+    2. A rewritten table row (``|`` first) keeps its number of unescaped ``|``.
+       Backslash pairs are taken out first, so a ``|`` after an even number of
+       backslashes is a column and one after an odd number is text.
+    3. An added line is not a copy of an unchanged line of the hunk, both compared
+       without their leading marks (``_text``). Only text holding a letter or a
+       digit is compared: blank lines, ``---``, fences and ``},`` legitimately repeat.
+    4. The fences (lines starting with three backticks or tildes after whitespace)
+       the hunk adds minus those it removes is even: a hunk never leaves a code
+       block open, and a whole block may still be added or removed.
+    """
+    for context, removed, added, pairs in _hunks(patch):
+        for old, new in pairs:
+            if _marks(old) != _marks(new):
+                return "rule1"
+            if old.lstrip().startswith("|") and _columns(old) != _columns(new):
+                return "rule2"
+        unchanged = {_text(line) for line in context}
+        if any(_counts_as_text(_text(line)) and _text(line) in unchanged for line in added):
+            return "rule3"
+        if (sum(map(_is_fence, added)) - sum(map(_is_fence, removed))) % 2:
+            return "rule4"
+    return None
+
+
+_LEAD = re.compile(r"([ \t]*)((?:>[ \t]?)*)([ \t]*)")
+_MARK = re.compile(r"(#{1,6}|[-*+]|\d+[.)])(?=[ \t]|$)")
+_PIPE = re.compile(r"(?<!\\)\|")
+
+
+def _marks(line: str) -> tuple[str, int, str, str | None]:
+    """Indentation, ``>`` depth, indentation inside the quote, and the list or heading marker kind."""
+    lead = _LEAD.match(line)
+    assert lead is not None  # every part of it is optional
+    mark = _MARK.match(line, lead.end())
+    kind = None
+    if mark is not None:
+        token = mark.group(1)
+        kind = f"ordered{token[-1]}" if token[0].isdigit() else token
+    return lead.group(1), lead.group(2).count(">"), lead.group(3), kind
+
+
+def _text(line: str) -> str:
+    """``line`` without its leading marks and surrounding whitespace."""
+    lead = _LEAD.match(line)
+    assert lead is not None
+    mark = _MARK.match(line, lead.end())
+    return line[mark.end() if mark is not None else lead.end() :].strip()
+
+
+def _counts_as_text(text: str) -> bool:
+    return any(char.isalnum() for char in text)
+
+
+def _columns(line: str) -> int:
+    return len(_PIPE.findall(line.replace("\\\\", "\0")))
+
+
+def _is_fence(line: str) -> bool:
+    stripped = line.lstrip()
+    return stripped.startswith("```") or stripped.startswith("~~~")
+
+
+_Hunk = tuple[list[str], list[str], list[str], list[tuple[str, str]]]
+
+
+def _hunks(patch: str) -> list[_Hunk]:
+    """Per hunk of ``patch``: its context, removed and added lines, and the rewritten pairs."""
+    hunks: list[_Hunk] = []
+    block_removed: list[str] = []
+    block_added: list[str] = []
+
+    def close_block() -> None:
+        if hunks:
+            pairs = zip(block_removed, block_added)
+            hunks[-1][3].extend((old, new) for old, new in pairs if old.strip() and new.strip())
+        block_removed.clear()
+        block_added.clear()
+
+    for raw in patch.splitlines()[2:]:  # past the ---/+++ header
+        if raw.startswith("@@"):
+            close_block()
+            hunks.append(([], [], [], []))
+            continue
+        if not hunks or raw.startswith("\\"):
+            continue
+        context, removed, added, _ = hunks[-1]
+        kind, line = raw[:1], raw[1:]
+        if kind == "-":
+            if block_added:
+                close_block()
+            removed.append(line)
+            block_removed.append(line)
+        elif kind == "+":
+            added.append(line)
+            block_added.append(line)
+        else:
+            close_block()
+            context.append(line)
+    close_block()
+    return hunks
+
+
 def build_patch(path: str, lines: Sequence[str], anchor: tuple[int, int], replacement: Sequence[str]) -> str:
     """The unified diff of replacing the anchor range of ``lines`` with ``replacement``.
 
@@ -383,19 +517,30 @@ def build_patch(path: str, lines: Sequence[str], anchor: tuple[int, int], replac
     return "".join(out)
 
 
-def render_target(target: StaleToMend) -> str:
+def render_target(target: StaleToMend | Sequence[StaleToMend]) -> str:
+    """The user message for one verdict, or for a group sharing one document and anchor."""
+    group = [target] if isinstance(target, StaleToMend) else list(target)
+    target = group[0]
     start, end = target.anchor
     first = max(1, start - CONTEXT_LINES)
     last = min(len(target.lines), end + CONTEXT_LINES)
-    out = [
-        f"Stale claim ({target.claim_type}) from {target.doc_path}, lines {start}-{end}:",
-        target.claim_text,
-        "",
-        f"Why it was judged stale: {target.reason}",
-        "",
-        "Evidence facts:",
-    ]
-    for f in target.facts:
+    if len(group) == 1:
+        out = [
+            f"Stale claim ({target.claim_type}) from {target.doc_path}, lines {start}-{end}:",
+            target.claim_text,
+            "",
+            f"Why it was judged stale: {target.reason}",
+        ]
+    else:
+        out = [
+            f"{len(group)} stale claims from {target.doc_path}, all about lines {start}-{end}."
+            " One rewrite of the passage must correct every one of them:"
+        ]
+        for n, member in enumerate(group, 1):
+            out += ["", f"{n}. ({member.claim_type}) {member.claim_text}", f"   Why it was judged stale: {member.reason}"]
+    out += ["", "Evidence facts:"]
+    facts = {f.id: f for member in group for f in member.facts}
+    for f in (facts[i] for i in sorted(facts)):
         content = canonical_json(f.content)
         if len(content) > FACT_CONTENT_MAX:
             content = content[:FACT_CONTENT_MAX] + "...(truncated)"
@@ -445,6 +590,7 @@ class MendPass:
     skipped: dict[str, int] = field(default_factory=lambda: dict.fromkeys(SKIP_REASONS, 0))
     failures: list[VerdictFailure] = field(default_factory=list)
     not_sent: int = 0  # targets left after the stage stopped
+    rejected_structure: list[int] = field(default_factory=list)  # verdict ids, named in the PR body
 
 
 def mend_stale(
@@ -463,32 +609,50 @@ def mend_stale(
     texts = {(d.repo, d.path): d for d in documents}
     passed = MendPass()
     try:
+        targets: list[tuple[str, StaleToMend]] = []
         for verdict_id, evidence_json, text, claim_type, repo, path, start, end in rows:
-            if mender.stopped:
-                passed.not_sent += 1
-                continue
             target = _target(conn, run_id, texts, verdict_id, evidence_json, text, claim_type, repo, path, start, end)
             if isinstance(target, str):
                 passed.skipped[target] += 1
-                continue
-            outcome = mender.draft(target)
-            if outcome is None:
-                passed.not_sent += 1
-            elif isinstance(outcome, VerdictFailure):
-                passed.failures.append(outcome)
-            elif isinstance(outcome, Rejected):
-                passed.rejected[outcome.reason] += 1
             else:
-                conn.execute(
+                targets.append((repo, target))
+        for group in group_targets(targets):
+            ids = [t.verdict_id for t in group]
+            if mender.stopped:
+                passed.not_sent += len(ids)
+                continue
+            outcome = mender.draft(group)
+            if outcome is None:
+                passed.not_sent += len(ids)
+            elif isinstance(outcome, VerdictFailure):
+                passed.failures += [VerdictFailure(i, outcome.error) for i in ids]
+            elif isinstance(outcome, Rejected):
+                passed.rejected[outcome.reason] += len(ids)
+                if outcome.reason == REJECT_STRUCTURE:
+                    passed.rejected_structure += ids
+            else:
+                conn.executemany(
                     "UPDATE verdict SET patch_draft = ? WHERE id = ? AND patch_draft IS NULL",
-                    (outcome.patch, verdict_id),
+                    [(outcome.patch, i) for i in ids],
                 )
                 conn.commit()
-                passed.drafted += 1
+                passed.drafted += len(ids)
     finally:
         _record(conn, run_id, passed, mender)
         conn.commit()
     return passed
+
+
+def group_targets(targets: Sequence[tuple[str, StaleToMend]]) -> list[list[StaleToMend]]:
+    """The ``(repo, target)`` pairs grouped by exactly equal repository, document and anchor.
+
+    Groups come in the order of their first verdict, members in the given order. Anchors
+    that only overlap are never chained into one group.
+    """
+    groups: dict[tuple[str, str, tuple[int, int]], list[StaleToMend]] = {}
+    for repo, target in targets:
+        groups.setdefault((repo, target.doc_path, target.anchor), []).append(target)
+    return list(groups.values())
 
 
 def _target(
@@ -573,6 +737,7 @@ def _record(conn: sqlite3.Connection, run_id: int, passed: MendPass, mender: Men
         "skipped": dict(passed.skipped),
         "failed": [f.as_stats() for f in passed.failures],
         "not_sent": passed.not_sent,
+        "rejected_structure": list(passed.rejected_structure),
     }
     if mender.aborted is not None:
         mend["aborted"] = mender.aborted

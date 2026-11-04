@@ -742,3 +742,56 @@ def test_cli_run_defaults_to_a_dry_run_end_to_end(monkeypatch, tmp_path, remotes
         status, stats_json = c.execute("SELECT status, stats_json FROM crawl_run").fetchone()
     pr = json.loads(stats_json)["mend"]["prs"][A]
     assert status == "succeeded" and pr["mode"] == "dry_run" and len(pr["applied"]) == 1 and pr["skipped"] == []
+
+
+# ------------------------------------- groups and the not-applied section (msg-269)
+
+
+def _set_rejected_structure(conn: sqlite3.Connection, run: int, ids: list[int]) -> None:
+    stats = stored(conn, run)
+    stats["mend"]["rejected_structure"] = ids
+    conn.execute("UPDATE verdict SET patch_draft = NULL WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
+    conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run))
+    conn.commit()
+
+
+def test_a_group_sharing_one_patch_is_one_draft_and_one_body_entry(conn, remotes, gh, tmp_path) -> None:
+    base = remotes.create(A)
+    run = make_run(conn, {A: {"commit": base}})
+    patch = build_patch("README.md", DOC.splitlines(keepends=True), (6, 6), ["fixed"])
+    group = [add_draft(conn, run, A, patch=patch, claim=f"claim {n}") for n in range(3)]
+    prs = publish_prs(conn, run, config(remotes, gh, tmp_path, mode="dry_run"))
+    assert prs[A]["applied"] == group and prs[A]["skipped"] == []
+    body = Path(prs[A]["body_path"]).read_text(encoding="utf-8")
+    assert body.count("- `README.md:6`") == 1 and all(f"`claim {n}`" in body for n in range(3))
+    assert "適用しなかった修正案" not in body  # no section without entries
+
+
+def test_skipped_and_structure_rejected_verdicts_are_listed_in_the_body(conn, remotes, gh, tmp_path) -> None:
+    """Fixture (c) with (a'): a partial overlap loses as apply_conflict; a structure rejection is named too."""
+    base = remotes.create(A)
+    run = make_run(conn, {A: {"commit": base}})
+    inner = add_draft(conn, run, A, (7, 7), new="inner")
+    wide = add_draft(conn, run, A, (6, 8), new="wide")
+    broken = add_draft(conn, run, A, (12, 12), new="broken")
+    _set_rejected_structure(conn, run, [broken])
+    prs = publish_prs(conn, run, config(remotes, gh, tmp_path, mode="dry_run"))
+    assert prs[A]["applied"] == [inner]
+    assert prs[A]["skipped"] == [{"verdict_id": wide, "reason": "apply_conflict"}]
+    body = Path(prs[A]["body_path"]).read_text(encoding="utf-8")
+    assert body.endswith(
+        "\n\n## 適用しなかった修正案\n"
+        f"\n- verdict {wide}: `README.md:6-8` (apply_conflict)"
+        f"\n- verdict {broken}: `README.md:12` (structure)"
+    )
+
+
+def test_the_not_applied_section_is_cut_to_half_the_limit_and_counts_the_rest() -> None:
+    from verimend.mender.publish import NotApplied
+
+    not_applied = [NotApplied(n, "README.md", (n, n), "apply_conflict") for n in range(1, 101)]
+    body = build_pr_body([_item()], run_id=1, base_commit="c", not_applied=not_applied, limit=2000)
+    assert len(body) <= 2000 and "`The port is 8113.`" in body
+    section = body.split("## 適用しなかった修正案")[1]
+    shown = section.count("(apply_conflict)")
+    assert 0 < shown < 100 and section.endswith(f"\n\nほか {100 - shown} 件")

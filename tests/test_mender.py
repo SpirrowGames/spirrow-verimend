@@ -545,3 +545,174 @@ def test_mender_tier_defaults_to_heavy_and_rejects_empty(monkeypatch) -> None:
     monkeypatch.setenv("VERIMEND_MENDER_TIER", " ")
     with pytest.raises(ValueError, match="mender_tier"):
         Settings()
+
+
+# ---------------------------------------- groups on one anchor (run 4, msg-269)
+
+
+def test_verdicts_on_the_same_anchor_are_one_call_and_one_draft(conn) -> None:
+    """Fixture (a): run 4's shape -- one verdict per parameter, all on one line."""
+    run = _run(conn)
+    fact = _fact(conn, run)
+    verdicts = [_stale(conn, run, (6, 6), fact_ids=[fact]) for _ in range(3)]
+    client = Recording(lines("The service listens on port 8120."))
+    passed = mend_stale(conn, run, _docs(), _mender(client))
+    assert client.tiers == ["heavy"] and passed.drafted == 3
+    patches = {_draft(conn, v) for v in verdicts}
+    assert len(patches) == 1 and None not in patches
+    user = client.calls[0][1]["content"]
+    assert "3 stale claims from README.md, all about lines 6-6" in user
+    assert user.count(f'"fact_id": {fact}') == 1  # shared evidence is sent once
+    assert _mend_stats(conn, run)["drafted"] == 3
+
+
+def test_overlapping_but_unequal_anchors_are_not_grouped(conn) -> None:
+    """Fixture (a'): only an exactly equal anchor groups; overlaps are never chained."""
+    run = _run(conn)
+    fact = _fact(conn, run)
+    wide = _stale(conn, run, (6, 7), fact_ids=[fact])
+    narrow = _stale(conn, run, (7, 7), fact_ids=[fact])
+    client = Recording(
+        lines("The service listens on port 8120.", "Health is on /health."), lines("Health is on /healthz.")
+    )
+    passed = mend_stale(conn, run, _docs(), _mender(client))
+    assert len(client.tiers) == 2 and passed.drafted == 2
+    assert _draft(conn, wide) != _draft(conn, narrow)
+
+
+def test_a_rejected_group_counts_every_verdict_and_lists_structure_ids(conn) -> None:
+    text = TEXT.replace("The service listens on port 8113.", "> The service listens on port 8113.")
+    run = _run(conn, text)
+    fact = _fact(conn, run)
+    verdicts = [_stale(conn, run, (6, 6), fact_ids=[fact]) for _ in range(2)]
+    passed = mend_stale(conn, run, _docs(text), _mender(FakeClient(lines("The service listens on port 8120."))))
+    assert passed.rejected["structure"] == 2 and passed.drafted == 0
+    stats = _mend_stats(conn, run)
+    assert stats["rejected"]["structure"] == 2 and stats["rejected_structure"] == verdicts
+    assert all(_draft(conn, v) is None for v in verdicts)
+
+
+def test_a_failed_group_fails_each_of_its_verdicts(conn) -> None:
+    run = _run(conn)
+    fact = _fact(conn, run)
+    verdicts = [_stale(conn, run, (6, 6), fact_ids=[fact]) for _ in range(2)]
+    mend_stale(conn, run, _docs(), _mender(FakeClient(http(400), http(400))))
+    assert [f["verdict_id"] for f in _mend_stats(conn, run)["failed"]] == verdicts
+
+
+# --------------------------------------------- structure rules (msg-271..277)
+
+
+def _structure(text: str, anchor: tuple[int, int], replacement: list[str]) -> str | None:
+    from verimend.mender.draft import check_structure
+
+    return check_structure(build_patch("x.md", text.splitlines(keepends=True), anchor, replacement))
+
+
+QUOTE = (
+    "Intro.\n"
+    "\n"
+    "> **Rule**\n"
+    ">\n"
+    "> `checkpoint` and `handoff` may return `success: false`:\n"  # 5
+    ">\n"
+    "> 1. **Do not hand over.**\n"
+    "> 2. **Do not retry.**\n"
+    "\n"
+    "After.\n"
+)
+
+
+def test_dropping_a_blockquote_mark_is_rule1() -> None:
+    """Fixture (b): the rewritten line loses its ``> ``."""
+    assert _structure(QUOTE, (5, 5), ["`checkpoint` may return `success: false`:"]) == "rule1"
+
+
+def test_run4_519_shape_unquoted_copies_of_kept_lines_are_rejected() -> None:
+    """Fixture (b'): verdict 519 -- the quoted items stay as context and unquoted copies are added."""
+    replacement = [
+        "> `checkpoint` may return `success: false`:",
+        "",
+        "1. **Do not hand over.**",
+        "2. **Do not retry.**",
+    ]
+    assert _structure(QUOTE, (5, 5), replacement) == "rule3"
+
+
+def test_changing_a_heading_level_or_list_kind_is_rule1() -> None:
+    text = "## Title\n\n- item one\n"
+    assert _structure(text, (1, 1), ["### Title"]) == "rule1"
+    assert _structure(text, (3, 3), ["1. item one"]) == "rule1"
+    assert _structure(text, (3, 3), ["- item 1"]) is None
+
+
+TABLE = (
+    "| action | parameters |\n"
+    "|---|---|\n"
+    "| `search` | query, limit |\n"  # 3
+    "| `delete` | doc_id |\n"
+    r"| `split` | a \| b |" "\n"  # 5: an escaped pipe in the cell
+    r"| `path` | C:\\|" "\n"  # 6: the cell ends with an escaped backslash, right before the column pipe
+)
+
+
+def test_a_table_row_with_an_extra_column_is_rule2() -> None:
+    """Fixture (b): verdict 1861 -- the row gains an empty first cell."""
+    assert _structure(TABLE, (4, 4), ["| | `delete` | doc_id, permanent |"]) == "rule2"
+    assert _structure(TABLE, (3, 3), ["| `search` | query, search_limit |"]) is None
+
+
+def test_escaped_pipes_in_a_cell_are_not_columns() -> None:
+    r"""Fixture (b''): adding or removing ``\|`` inside a cell keeps the columns."""
+    assert _structure(TABLE, (5, 5), [r"| `split` | a \| b \| c |"]) is None
+    assert _structure(TABLE, (5, 5), ["| `split` | a or b |"]) is None
+    assert _structure(TABLE, (5, 5), ["| `split` | a | b |"]) == "rule2"
+
+
+def test_a_cell_ending_in_an_escaped_backslash_keeps_its_pipe_a_column() -> None:
+    r"""Fixture (b''''): ``\\|`` is an escaped backslash, then a column; ``\\\|`` ends in a text pipe."""
+    from verimend.mender.draft import _columns
+
+    assert _columns(r"| `path` | C:\\|") == 3 and _columns(r"| `path` | C:\\\|") == 2
+    assert _structure(TABLE, (6, 6), [r"| `path` | D:\\|"]) is None
+    assert _structure(TABLE, (6, 6), [r"| `path` | D:\\\|"]) == "rule2"
+
+
+def test_blank_lines_and_rules_may_repeat_context() -> None:
+    """Fixture (b'''): a blank line or ``---`` equal to a context line is not a duplicate."""
+    text = "Para one.\n\nPara two old.\n\n---\n\nEnd.\n"
+    assert _structure(text, (3, 3), ["Para two new.", "", "Para three."]) is None
+    assert _structure(text, (3, 3), ["Para two new.", "---", "More."]) is None
+
+
+CODE = (
+    "Example:\n"
+    "\n"
+    "```json\n"
+    "{\n"
+    '  "a": {\n'
+    '    "x": 1\n'  # 6
+    "  },\n"
+    '  "b": 2\n'
+    "}\n"
+    "```\n"  # 10
+    "\n"
+    "Done.\n"
+)
+
+
+def test_adding_an_entry_with_a_closing_brace_is_kept() -> None:
+    """Fixture (d): a ``},`` line equal to a context line is not a duplicate (rule 3 needs text)."""
+    assert _structure(CODE, (6, 6), ['    "x": 1', "  },", '  "c": {', '    "y": 3']) is None
+
+
+def test_dropping_a_closing_fence_is_rule4() -> None:
+    """Fixture (e)."""
+    assert _structure(CODE, (9, 10), ["}"]) == "rule4"
+
+
+def test_adding_or_removing_a_whole_code_block_is_kept() -> None:
+    """Fixture (f): an even change in fences."""
+    text = "Run it:\n\n```sh\nold-cmd\n```\n\nDone.\n"
+    assert _structure(text, (3, 5), ["Run `new-cmd`."]) is None
+    assert _structure(text, (7, 7), ["Done, or:", "", "```sh", "other-cmd", "```"]) is None
