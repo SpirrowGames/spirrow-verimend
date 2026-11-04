@@ -517,6 +517,10 @@ def build_patch(path: str, lines: Sequence[str], anchor: tuple[int, int], replac
     return "".join(out)
 
 
+EDIT_MARK = "EDIT"
+KEEP_MARK = "KEEP"
+
+
 def render_target(target: StaleToMend | Sequence[StaleToMend]) -> str:
     """The user message for one verdict, or for a group sharing one document and anchor."""
     group = [target] if isinstance(target, StaleToMend) else list(target)
@@ -545,9 +549,11 @@ def render_target(target: StaleToMend | Sequence[StaleToMend]) -> str:
         if len(content) > FACT_CONTENT_MAX:
             content = content[:FACT_CONTENT_MAX] + "...(truncated)"
         out.append(json.dumps({"fact_id": f.id, "kind": f.kind}) + " " + content)
-    out += ["", "Passage (rewrite only the lines marked >):"]
+    # The line marks are words that are not Markdown, so a passage line that itself
+    # starts with `>` (a blockquote) cannot be mistaken for the mark (run 4, msg-284).
+    out += ["", f"Passage (rewrite only the lines marked {EDIT_MARK}):"]
     for n in range(first, last + 1):
-        mark = ">" if start <= n <= end else " "
+        mark = EDIT_MARK if start <= n <= end else KEEP_MARK
         out.append(f"{mark} {n:>4} | {_strip_eol(target.lines[n - 1])}")
     return "\n".join(out)
 

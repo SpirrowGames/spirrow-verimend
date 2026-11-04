@@ -17,7 +17,7 @@ from verimend.collector.facts import canonical_json
 from verimend.db import connection, migrate
 from verimend.extractor import Document
 from verimend.mender import MenderAborted, MenderConfigError, MenderSession, build_patch, mend_stale
-from verimend.mender.draft import _evidence, check_replacement, validate_draft
+from verimend.mender.draft import _evidence, check_replacement, load_prompt, validate_draft
 from verimend.settings import Settings
 
 REPO = "SpirrowGames/spirrow-magickit"
@@ -211,10 +211,10 @@ def test_the_prompt_carries_the_claim_reason_facts_and_marked_anchor(conn) -> No
     user = client.calls[0][1]["content"]
     assert "The service listens on port 8113." in user and "the config says 8120" in user
     assert f'"fact_id": {fact}' in user and '"port":8120' in user
-    assert ">    6 | The service listens on port 8113." in user
-    assert "     3 | Intro line." in user and "     9 | Run `magickit serve` to start." in user
+    assert "EDIT    6 | The service listens on port 8113." in user
+    assert "KEEP    3 | Intro line." in user and "KEEP    9 | Run `magickit serve` to start." in user
     assert "Intro line" not in user.split("Passage")[0]
-    assert "     2 |" not in user and "    10 |" not in user  # three lines of context each side
+    assert "KEEP    2 |" not in user and "KEEP   10 |" not in user  # three lines of context each side
 
 
 def test_a_model_that_rewrites_beyond_the_anchor_still_cannot_change_outside_it(conn) -> None:
@@ -716,3 +716,54 @@ def test_adding_or_removing_a_whole_code_block_is_kept() -> None:
     text = "Run it:\n\n```sh\nold-cmd\n```\n\nDone.\n"
     assert _structure(text, (3, 5), ["Run `new-cmd`."]) is None
     assert _structure(text, (7, 7), ["Done, or:", "", "```sh", "other-cmd", "```"]) is None
+
+
+# ---------------------------------------- line marks that are not Markdown (msg-284/286/288)
+
+
+def _passage(user: str) -> list[str]:
+    return user.split("Passage (rewrite only the lines marked EDIT):", 1)[1].splitlines()[1:]
+
+
+def test_a_blockquote_line_keeps_its_own_mark_after_the_edit_mark(conn) -> None:
+    """Fixture (g): the quote's `>` is the line's text, and no line starts with a `>` mark."""
+    text = TEXT.replace("The service listens on port 8113.", "> The service listens on port 8113.")
+    run = _run(conn, text)
+    fact = _fact(conn, run)
+    _stale(conn, run, (6, 6), fact_ids=[fact])
+    client = Recording(lines("> The service listens on port 8120."))
+    passed = mend_stale(conn, run, _docs(text), _mender(client))
+    user = client.calls[0][1]["content"]
+    assert "EDIT    6 | > The service listens on port 8113." in user
+    passage = _passage(user)
+    assert passage and all(re.match(r"(EDIT|KEEP) {1,4}\d+ \| ", line) for line in passage)
+    assert not any(line.startswith(">") for line in passage)
+    assert passed.drafted == 1  # the quote was kept, so the structure rules let it through
+
+
+def test_a_grouped_prompt_uses_the_same_marks(conn) -> None:
+    """Fixture (h): the group prompt marks its passage the same way."""
+    run = _run(conn)
+    fact = _fact(conn, run)
+    for _ in range(2):
+        _stale(conn, run, (6, 7), fact_ids=[fact])
+    client = Recording(lines("The service listens on port 8120.", "Health is on /health."))
+    mend_stale(conn, run, _docs(), _mender(client))
+    user = client.calls[0][1]["content"]
+    assert "2 stale claims from README.md" in user
+    passage = _passage(user)
+    assert [line[:4] for line in passage] == ["KEEP"] * 3 + ["EDIT"] * 2 + ["KEEP"] * 3
+    assert not any(line.startswith(">") for line in passage)
+
+
+def test_the_prompt_says_to_keep_every_leading_mark_without_listing_them() -> None:
+    """Fixture (g'): one general sentence, no enumerated symbols, no rewrite exception."""
+    prompt = load_prompt()
+    assert (
+        "Each passage line's text starts right after the first `| `; everything after it is the"
+        " document's own content. When you keep or rewrite a line, keep its leading whitespace,"
+        " Markdown syntax and punctuation exactly as they are, even if you change the words after them."
+    ) in " ".join(prompt.split())
+    assert "unless the facts contradict it" not in prompt
+    assert not re.search(r"`[>#*+-]`\s*[,、]\s*`[>#*+-]`", prompt)  # no list of symbols
+    assert "marked `>`" not in prompt and "`>` marker" not in prompt
