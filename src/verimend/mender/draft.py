@@ -519,6 +519,7 @@ def build_patch(path: str, lines: Sequence[str], anchor: tuple[int, int], replac
 
 EDIT_MARK = "EDIT"
 KEEP_MARK = "KEEP"
+PASSAGE_HEADER = f"Passage (rewrite only the lines marked {EDIT_MARK}):"
 
 
 def render_target(target: StaleToMend | Sequence[StaleToMend]) -> str:
@@ -551,7 +552,7 @@ def render_target(target: StaleToMend | Sequence[StaleToMend]) -> str:
         out.append(json.dumps({"fact_id": f.id, "kind": f.kind}) + " " + content)
     # The line marks are words that are not Markdown, so a passage line that itself
     # starts with `>` (a blockquote) cannot be mistaken for the mark (run 4, msg-284).
-    out += ["", f"Passage (rewrite only the lines marked {EDIT_MARK}):"]
+    out += ["", PASSAGE_HEADER]
     for n in range(first, last + 1):
         mark = EDIT_MARK if start <= n <= end else KEEP_MARK
         out.append(f"{mark} {n:>4} | {_strip_eol(target.lines[n - 1])}")

@@ -17,7 +17,7 @@ from verimend.collector.facts import canonical_json
 from verimend.db import connection, migrate
 from verimend.extractor import Document
 from verimend.mender import MenderAborted, MenderConfigError, MenderSession, build_patch, mend_stale
-from verimend.mender.draft import _evidence, check_replacement, load_prompt, validate_draft
+from verimend.mender.draft import PASSAGE_HEADER, _evidence, check_replacement, load_prompt, validate_draft
 from verimend.settings import Settings
 
 REPO = "SpirrowGames/spirrow-magickit"
@@ -722,7 +722,7 @@ def test_adding_or_removing_a_whole_code_block_is_kept() -> None:
 
 
 def _passage(user: str) -> list[str]:
-    return user.split("Passage (rewrite only the lines marked EDIT):", 1)[1].splitlines()[1:]
+    return user.split(PASSAGE_HEADER, 1)[1].splitlines()[1:]
 
 
 def test_a_blockquote_line_keeps_its_own_mark_after_the_edit_mark(conn) -> None:
