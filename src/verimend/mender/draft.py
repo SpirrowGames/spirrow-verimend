@@ -69,6 +69,14 @@ never ``failed``: the extraction and the verdicts before it stay.
 ``strict`` raises ``MenderConfigError`` / ``MenderAborted`` instead, with the
 same ``_abort`` contract as the other two stages (``raise ... from cause``,
 the cause never stored in ``detail``).
+
+**Lexora /v1/decide (T06, ``verimend.decide``).** When the session carries a
+``decider`` (``decide_mode`` ``observe`` / ``enforce``), 判定 1 runs per target
+after the checks above and before grouping, and 判定 2 runs per group after a
+draft is built, its ``decision`` rows committed in the same transaction as the
+draft. In ``enforce`` a ``skip_drift`` / ``skip_mapping`` verdict is not drafted
+(``stats.mend.decide.skipped``); in ``observe`` nothing changes but the rows.
+Without a decider (``decide_mode = off``) none of this runs.
 """
 
 from __future__ import annotations
@@ -86,6 +94,8 @@ from importlib import resources
 from typing import Any
 
 from verimend.collector.facts import canonical_json
+from verimend.decide.routing import OUT_SKIP_DRIFT, OUT_SKIP_MAPPING
+from verimend.decide.stage import Decider, decider_from_settings
 from verimend.extractor.client import LexoraClient, LLMClient
 from verimend.extractor.extract import Document
 from verimend.llm_policy import (
@@ -216,8 +226,10 @@ class MenderSession:
         sleep: Callable[[float], None] = time.sleep,
         strict: bool = False,
         prompt: str | None = None,
+        decider: Decider | None = None,
     ) -> None:
         self.client = client
+        self.decider = decider
         self.tier = tier
         self.retry_after_max_s = retry_after_max_s
         self.sleep = sleep
@@ -231,6 +243,8 @@ class MenderSession:
         close = getattr(self.client, "close", None)
         if callable(close):
             close()
+        if self.decider is not None:
+            self.decider.close()
 
     def __enter__(self) -> "MenderSession":
         return self
@@ -341,6 +355,7 @@ def mender_from_settings(settings, **kwargs) -> MenderSession:
     if not settings.lexora_url:
         raise MenderConfigError("lexora_url_unset")
     client = LexoraClient(settings.lexora_url, settings.lexora_timeout_s)
+    kwargs.setdefault("decider", decider_from_settings(settings))
     return MenderSession(
         client, tier=settings.mender_tier, retry_after_max_s=settings.lexora_retry_after_max_s, **kwargs
     )
@@ -598,6 +613,8 @@ class MendPass:
     failures: list[VerdictFailure] = field(default_factory=list)
     not_sent: int = 0  # targets left after the stage stopped
     rejected_structure: list[int] = field(default_factory=list)  # verdict ids, named in the PR body
+    # 判定 1 skips in enforce mode (T06); empty without a decider
+    decide_skipped: dict[str, int] = field(default_factory=lambda: dict.fromkeys((OUT_SKIP_DRIFT, OUT_SKIP_MAPPING), 0))
 
 
 def mend_stale(
@@ -606,7 +623,7 @@ def mend_stale(
     """Draft a patch for every draft-less stale verdict of the run. Updates ``stats.mend``."""
     rows = conn.execute(
         """
-        SELECT v.id, v.evidence_json, c.text, c.claim_type, c.doc_repo, c.doc_path, c.anchor_start, c.anchor_end
+        SELECT v.id, v.method, v.evidence_json, c.text, c.claim_type, c.doc_repo, c.doc_path, c.anchor_start, c.anchor_end
         FROM verdict AS v JOIN claim AS c ON c.id = v.claim_id
         WHERE c.run_id = ? AND v.result = 'stale' AND v.patch_draft IS NULL
         ORDER BY v.id
@@ -615,14 +632,23 @@ def mend_stale(
     ).fetchall()
     texts = {(d.repo, d.path): d for d in documents}
     passed = MendPass()
+    decider = mender.decider
+    stage1 = {}
     try:
         targets: list[tuple[str, StaleToMend]] = []
-        for verdict_id, evidence_json, text, claim_type, repo, path, start, end in rows:
+        for verdict_id, method, evidence_json, text, claim_type, repo, path, start, end in rows:
             target = _target(conn, run_id, texts, verdict_id, evidence_json, text, claim_type, repo, path, start, end)
             if isinstance(target, str):
                 passed.skipped[target] += 1
-            else:
-                targets.append((repo, target))
+                continue
+            if decider is not None:
+                judged = decider.judge_drift(conn, verdict_id, method, target)
+                stage1[verdict_id] = judged.judgement
+                if judged.skips:
+                    log.info("verdict %s: %s (decide enforce); no draft", verdict_id, judged.outcome)
+                    passed.decide_skipped[judged.outcome] += 1
+                    continue
+            targets.append((repo, target))
         for group in group_targets(targets):
             ids = [t.verdict_id for t in group]
             if mender.stopped:
@@ -638,10 +664,13 @@ def mend_stale(
                 if outcome.reason == REJECT_STRUCTURE:
                     passed.rejected_structure += ids
             else:
+                risk = decider.judge_patch(group, outcome.patch, [stage1[i] for i in ids]) if decider else None
                 conn.executemany(
                     "UPDATE verdict SET patch_draft = ? WHERE id = ? AND patch_draft IS NULL",
                     [(outcome.patch, i) for i in ids],
                 )
+                if risk is not None:
+                    decider.insert_patch_rows(conn, ids, risk)
                 conn.commit()
                 passed.drafted += len(ids)
     finally:
@@ -750,8 +779,11 @@ def _record(conn: sqlite3.Connection, run_id: int, passed: MendPass, mender: Men
         mend["aborted"] = mender.aborted
     if mender.config_error is not None:
         mend["config_error"] = mender.config_error
-    if "prs" in stats.get("mend", {}):
-        mend["prs"] = stats["mend"]["prs"]  # the idempotency record of what is already published
+    if mender.decider is not None:
+        mend["decide"] = {"mode": mender.decider.mode, "skipped": dict(passed.decide_skipped)}
+    for kept in ("prs", "findings_only"):  # publish's record of the run
+        if kept in stats.get("mend", {}):
+            mend[kept] = stats["mend"][kept]
     stats["mend"] = mend
     conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))
 
@@ -763,6 +795,7 @@ def mend_stage_failed(mend_stats: dict[str, Any]) -> bool:
         or "aborted" in mend_stats
         or "config_error" in mend_stats
         or any(
-            "publish_error" in pr or pr.get("reason") == "no_base_commit" for pr in mend_stats.get("prs", {}).values()
+            "publish_error" in pr or "label_error" in pr or pr.get("reason") == "no_base_commit"
+            for pr in mend_stats.get("prs", {}).values()
         )
     )
