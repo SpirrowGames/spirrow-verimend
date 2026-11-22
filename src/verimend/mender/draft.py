@@ -665,12 +665,16 @@ def mend_stale(
                     passed.rejected_structure += ids
             else:
                 risk = decider.judge_patch(group, outcome.patch, [stage1[i] for i in ids]) if decider else None
-                conn.executemany(
-                    "UPDATE verdict SET patch_draft = ? WHERE id = ? AND patch_draft IS NULL",
-                    [(outcome.patch, i) for i in ids],
-                )
-                if risk is not None:
-                    decider.insert_patch_rows(conn, ids, risk)
+                try:  # the draft and its 判定 2 rows land together or not at all
+                    conn.executemany(
+                        "UPDATE verdict SET patch_draft = ? WHERE id = ? AND patch_draft IS NULL",
+                        [(outcome.patch, i) for i in ids],
+                    )
+                    if risk is not None:
+                        decider.insert_patch_rows(conn, ids, risk)
+                except BaseException:
+                    conn.rollback()  # before the finally below commits stats.mend
+                    raise
                 conn.commit()
                 passed.drafted += len(ids)
     finally:

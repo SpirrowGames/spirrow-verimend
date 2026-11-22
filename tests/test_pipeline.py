@@ -386,3 +386,12 @@ def test_doc_globs_match_recursively_and_stay_in_one_component(make_tree) -> Non
         "README.md", "docs/a/b/c.md", "docs/guide/setup.md", "docs/top.md"
     ]
     assert doc_paths(tree, ["docs/*.md"]) == ["docs/top.md"]
+
+
+def test_exclude_globs_remove_documents_before_extraction(make_tree) -> None:
+    tree = make_tree({"README.md": "x", ".claude/skills/typesafe-ai/SKILL.md": "x", ".claude/skills/other/SKILL.md": "x"})
+    globs = ["README.md", ".claude/**/*.md"]
+    assert doc_paths(tree, globs, [".claude/skills/typesafe-ai/**"]) == [".claude/skills/other/SKILL.md", "README.md"]
+    assert doc_paths(tree, globs, []) == [
+        ".claude/skills/other/SKILL.md", ".claude/skills/typesafe-ai/SKILL.md", "README.md"
+    ]

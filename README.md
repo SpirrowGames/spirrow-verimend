@@ -23,6 +23,21 @@ Verimend crawls the Spirrow products, detects drift between reality (code, confi
 - **Don't rely on long context**: reconciliation runs on small, retrieval-narrowed units
 - **Delegate the periphery to the existing platform**: LLM inference = Lexora / document retrieval = Prismind / GitHub operations = Magickit / escalation = Conclair chatroom
 
+## Operation: Lexora decide judgements
+
+`VERIMEND_DECIDE_MODE` defaults to `off`: Lexora's `/v1/decide` is not called and nothing changes.
+Turning it on goes in this order (thread `T-decide-drift-score`, ruling of 2026-11-17):
+
+1. `off` (the default shipped by the code).
+2. `observe`: judgements are recorded in the `decision` table and change nothing. Enabling it in
+   production is a cost decision (Tier-C `cost`) and goes through the deploy-authority check (ADR-24).
+3. `enforce`: judgement 1 skips confident non-drifts, and judgement 2 labels PRs and keeps
+   `findings_only` drafts out of them. Takahito decides this switch separately, after reading the
+   `observe` records.
+
+The PR labels `verimend:auto` and `verimend:review` must exist in each target repository before
+`enforce` publishes in `github` mode; a missing label is recorded as `label_error` (run `partial`).
+
 ## Status
 
 Implementation, milestone M1. In place: FastAPI on :8118 with `/health`, SQLite migrations for

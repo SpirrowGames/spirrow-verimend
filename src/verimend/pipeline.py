@@ -91,7 +91,7 @@ def run_pipeline(
     documents: list[Document] = []
 
     def read_documents(target: Target, tree: RepoTree, commit: str) -> None:
-        for path in doc_paths(tree, target.doc_globs):
+        for path in doc_paths(tree, target.doc_globs, target.exclude_globs):
             text = tree.text(path)
             if text is not None:  # an unreadable file is in the tree's skipped_files
                 documents.append(Document(target.repo, path, text))
@@ -170,15 +170,18 @@ def _mend(
         mend_stale(conn, run_id, documents, mender)
 
 
-def doc_paths(tree: RepoTree, globs: Sequence[str]) -> list[str]:
-    """Files of ``tree`` matching any of the repository-relative ``globs``.
+def doc_paths(tree: RepoTree, globs: Sequence[str], exclude: Sequence[str] = ()) -> list[str]:
+    """Files of ``tree`` matching any of the repository-relative ``globs`` and none of ``exclude``.
 
     ``*`` and ``?`` stay within one path component; ``**/`` matches zero or
     more whole directories. (``PurePath.match`` cannot do the latter before
     Python 3.13, and CI runs 3.11.)
     """
     patterns = [_glob_regex(g) for g in globs]
-    return [f for f in tree.files if any(p.fullmatch(f) for p in patterns)]
+    excluded = [_glob_regex(g) for g in exclude]
+    return [
+        f for f in tree.files if any(p.fullmatch(f) for p in patterns) and not any(x.fullmatch(f) for x in excluded)
+    ]
 
 
 @lru_cache(maxsize=None)

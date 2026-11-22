@@ -164,3 +164,18 @@ def test_service_health_on_two_targets_is_rejected() -> None:
 def test_service_health_on_one_target_is_accepted() -> None:
     raw = {"version": 1, "targets": [_health_target("o/a"), _health_target("o/b", enabled=False)]}
     assert [t.repo for t in parse_targets(raw).targets] == ["o/a", "o/b"]
+
+
+# ------------------------------------------------- exclude_globs (T06, msg-324 gap 3)
+
+
+def test_exclude_globs_default_when_omitted_and_explicit_empty_is_kept() -> None:
+    assert parse_targets(VALID).targets[0].exclude_globs == [".claude/skills/typesafe-ai/**"]
+    assert parse_targets(_with_target(exclude_globs=[])).targets[0].exclude_globs == []
+    assert parse_targets(_with_target(exclude_globs=["vendor/**"])).targets[0].exclude_globs == ["vendor/**"]
+
+
+@pytest.mark.parametrize("glob", ["/etc/**", "../x/**", ""])
+def test_exclude_globs_are_checked_like_doc_globs(glob: str) -> None:
+    with pytest.raises(TargetsConfigError):
+        parse_targets(_with_target(exclude_globs=[glob]))
