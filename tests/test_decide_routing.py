@@ -38,14 +38,12 @@ from verimend.decide.routing import (
 T = Thresholds()
 
 
-def drift(level: float, conf: float = 0.9, mapping: float = 0.9, mapping_conf: float = 0.9) -> DriftJudgement:
-    return DriftJudgement(SIGNAL, Answer(level, conf), Answer(mapping, mapping_conf), "d-1")
+def drift(level: float, conf: float = 0.9, mapping: float = 0.9) -> DriftJudgement:
+    return DriftJudgement(SIGNAL, Answer(level, conf), mapping, "d-1")
 
 
-def patch(behaviour: float, claim: float, conf: float = 0.9, claim_conf: float | None = None) -> PatchRiskJudgement:
-    return PatchRiskJudgement(
-        True, Answer(behaviour, conf), Answer(claim, conf if claim_conf is None else claim_conf), "p-1"
-    )
+def patch(behaviour: float, claim: float) -> PatchRiskJudgement:
+    return PatchRiskJudgement(True, behaviour, claim, "p-1")
 
 
 NO_PATCH = PatchRiskJudgement(False)
@@ -65,7 +63,9 @@ LOW = drift(2, conf=0.3)
         (EX, OUT_EXEMPT),
         (NS, OUT_NO_SIGNAL),  # generate, never skip
         (drift(0, conf=0.3), OUT_GENERATED_LOW_CONF),  # a low drift with low confidence is not skipped
-        (drift(2, mapping_conf=0.3, mapping=0.0), OUT_GENERATED_LOW_CONF),
+        (drift(2, conf=0.3, mapping=0.0), OUT_GENERATED_LOW_CONF),  # low drift confidence: a wrong mapping is not skipped either
+        (drift(2, conf=0.59), OUT_GENERATED_LOW_CONF),
+        (drift(0, conf=0.60), OUT_SKIP_DRIFT),
         (drift(0), OUT_SKIP_DRIFT),
         (drift(2, mapping=0.39), OUT_SKIP_MAPPING),
         (drift(1, mapping=0.40), OUT_GENERATED),
@@ -116,10 +116,7 @@ def g(*members: DriftJudgement) -> GroupStage1:
         # 分岐 2
         ("2 signal/no", g(SIG), NO_PATCH, OUT_REVIEW_NO_PATCH_SIGNAL),
         ("2 low_conf/no", g(LOW), NO_PATCH, OUT_REVIEW_NO_PATCH_SIGNAL),
-        # 分岐 3
-        ("3 low stage-2 conf", g(SIG), patch(0.1, 0.1, conf=0.5), OUT_REVIEW),
-        ("3 exempt low stage-2 conf", g(EX), patch(0.1, 0.1, conf=0.5), OUT_REVIEW),
-        ("3 before 4", g(SIG), patch(0.1, 0.9, claim_conf=0.5), OUT_REVIEW),
+        # 分岐 3: vacant (msg-328 F1(b)); no stage-2 confidence is read
         # 分岐 4
         ("4 findings", g(SIG), patch(0.1, 0.75), OUT_FINDINGS_ONLY),
         ("4 non-mixed low_conf x high claim", g(LOW), patch(0.1, 0.9), OUT_FINDINGS_ONLY),
@@ -132,7 +129,7 @@ def g(*members: DriftJudgement) -> GroupStage1:
         ("6 low_conf", g(LOW), SAFE, OUT_REVIEW),
         # 分岐 7
         ("7 signal", g(SIG), SAFE, OUT_AUTO),
-        ("7 boundary", g(SIG), patch(0.25, 0.25, conf=0.6), OUT_AUTO),
+        ("7 boundary", g(SIG), patch(0.25, 0.25), OUT_AUTO),
         ("7 exempt", g(EX), SAFE, OUT_AUTO),
     ],
 )
@@ -164,3 +161,43 @@ def test_route_patch_default_denies_an_unknown_stage1_class() -> None:
 )
 def test_pr_label(outcomes, label) -> None:
     assert pr_label(outcomes) == label
+
+
+# ------------------------------------------- DoD 4'' (msg-329 / msg-330 boundaries)
+
+
+@pytest.mark.parametrize(
+    ("name", "stage1", "stage2", "expected"),
+    [
+        # the mid band (ruling condition 1): never auto, never silently dropped
+        ("mid 0.5/0.5", g(SIG), patch(0.5, 0.5), OUT_REVIEW),
+        ("mid 0.5/0.5 exempt", g(EX), patch(0.5, 0.5), OUT_REVIEW),
+        # auto_pr_max_risk = 0.25: just under / equal / just over, on each question
+        ("behaviour 0.24", g(SIG), patch(0.24, 0.1), OUT_AUTO),
+        ("behaviour 0.25", g(SIG), patch(0.25, 0.1), OUT_AUTO),
+        ("behaviour 0.26", g(SIG), patch(0.26, 0.1), OUT_REVIEW),
+        ("claim 0.24", g(SIG), patch(0.1, 0.24), OUT_AUTO),
+        ("claim 0.25", g(SIG), patch(0.1, 0.25), OUT_AUTO),
+        ("claim 0.26", g(SIG), patch(0.1, 0.26), OUT_REVIEW),
+        # findings_only_min_claim_risk = 0.75: just under / equal / just over
+        ("claim 0.74", g(SIG), patch(0.1, 0.74), OUT_REVIEW),
+        ("claim 0.75", g(SIG), patch(0.1, 0.75), OUT_FINDINGS_ONLY),
+        ("claim 0.76", g(SIG), patch(0.1, 0.76), OUT_FINDINGS_ONLY),
+        # a high behaviour risk does not stop findings_only
+        ("behaviour 0.9 x claim 0.8", g(SIG), patch(0.9, 0.8), OUT_FINDINGS_ONLY),
+        # non-mixed, stage-1 low_conf, claim 0.8: findings_only with no stage-2 confidence in play
+        ("low_conf x claim 0.8", g(LOW), patch(0.1, 0.8), OUT_FINDINGS_ONLY),
+        # low_conf stage 1 does not get auto even with a safe stage 2
+        ("low_conf x safe", g(LOW), patch(0.25, 0.25), OUT_REVIEW),
+        # mixed groups precede everything
+        ("mixed x claim 0.8", g(SIG, LOW), patch(0.1, 0.8), OUT_REVIEW_MIXED_GROUP),
+        ("mixed x safe", g(SIG, LOW), patch(0.1, 0.1), OUT_REVIEW_MIXED_GROUP),
+    ],
+)
+def test_route_patch_boundaries(name, stage1, stage2, expected) -> None:
+    assert route_patch(stage1, stage2, T) == expected, name
+
+
+def test_stage2_has_no_confidence_field() -> None:
+    # 分岐 3 is vacant: the stage-2 judgement carries probabilities only
+    assert "confidence" not in PatchRiskJudgement.__dataclass_fields__

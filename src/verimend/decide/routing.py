@@ -1,4 +1,4 @@
-"""The T06 decision rules, as pure functions (thread T-decide-drift-score, msg-047 / msg-317 / msg-319 / msg-321).
+"""The T06 decision rules, as pure functions (thread T-decide-drift-score, msg-047 / msg-317 / msg-319 / msg-321, as ruled by msg-328 / msg-329).
 
 Nothing here talks to Lexora or the database. The inputs are what a judgement
 returned, already classified into a state; the outputs are ``outcome`` values
@@ -18,11 +18,20 @@ confidence never skip generation; a confident low drift or a confident wrong
 mapping skips it.
 
 **判定 2 (patch_risk, per mender group, after the draft).** ``route_patch``
-evaluates 分岐 0 then 1..8, in order. 分岐 0 settles a group whose stage-1
+evaluates 分岐 0 then 1..8, in order (分岐 3 is a vacant number, see below). 分岐 0 settles a group whose stage-1
 classes are not all the same as ``review_mixed_group`` before anything else,
 so the "findings_only from stage 2 alone" rule (分岐 4) only ever sees a
 non-mixed group. ``auto`` needs every condition met explicitly (分岐 7);
 anything left over is ``review`` (分岐 8, default-deny).
+
+判定 2's two questions are ``noul``: Lexora's contract gives a noul answer a
+probability and no confidence. By the human ruling of msg-328 (F1(b)), 判定 2
+carries no confidence condition: the old 分岐 3 ("a stage-2 answer below
+``min_confidence``") is removed and its number left vacant so the thread's
+branch numbers still apply, and 分岐 7 no longer reads a stage-2 confidence.
+Uncertainty in 判定 2 shows in the probability itself: anything in
+``(auto_pr_max_risk, findings_only_min_claim_risk)`` lands on 分岐 5 (review).
+判定 1's ``drift`` is a ``score`` and keeps its confidence (low_conf, 分岐 6 / 7).
 
 **PR label.** ``pr_label`` ranks review > no label > auto over the drafts that
 go into one PR; ``findings_only`` drafts are not in the PR and do not count.
@@ -104,21 +113,25 @@ class Answer:
 
 @dataclass(frozen=True)
 class DriftJudgement:
-    """判定 1 for one verdict. ``drift`` / ``mapping_correct`` are set exactly when ``state == SIGNAL``."""
+    """判定 1 for one verdict. ``drift`` / ``mapping_correct`` are set exactly when ``state == SIGNAL``.
+
+    ``drift`` is a ``score`` (a 0..3 level and its confidence); ``mapping_correct``
+    is a ``noul`` probability, which has no confidence in Lexora's contract.
+    """
 
     state: str  # SIGNAL | NO_SIGNAL | EXEMPT
     drift: Answer | None = None
-    mapping_correct: Answer | None = None
+    mapping_correct: float | None = None
     decision_id: str | None = None
 
 
 @dataclass(frozen=True)
 class PatchRiskJudgement:
-    """判定 2 for one group's draft. The two answers are set exactly when ``signal``."""
+    """判定 2 for one group's draft: two noul probabilities, set exactly when ``signal`` (no confidence)."""
 
     signal: bool
-    changes_behavior_description: Answer | None = None
-    introduces_claim_not_in_code: Answer | None = None
+    changes_behavior_description: float | None = None
+    introduces_claim_not_in_code: float | None = None
     decision_id: str | None = None
 
 
@@ -126,11 +139,11 @@ class PatchRiskJudgement:
 
 
 def drift_low_confidence(judgement: DriftJudgement, t: Thresholds) -> bool:
-    """A ``signal`` judgement any of whose answers is below ``min_confidence``."""
+    """A ``signal`` judgement whose ``drift`` confidence is below ``min_confidence`` (the only confidence 判定 1 has)."""
     if judgement.state != SIGNAL:
         return False
-    assert judgement.drift is not None and judgement.mapping_correct is not None
-    return min(judgement.drift.confidence, judgement.mapping_correct.confidence) < t.min_confidence
+    assert judgement.drift is not None
+    return judgement.drift.confidence < t.min_confidence
 
 
 def drift_gate(judgement: DriftJudgement, t: Thresholds) -> str:
@@ -144,7 +157,7 @@ def drift_gate(judgement: DriftJudgement, t: Thresholds) -> str:
     assert judgement.drift is not None and judgement.mapping_correct is not None
     if judgement.drift.value < t.drift_min_level:
         return OUT_SKIP_DRIFT
-    if judgement.mapping_correct.value < t.min_mapping_correct:
+    if judgement.mapping_correct < t.min_mapping_correct:
         return OUT_SKIP_MAPPING
     return OUT_GENERATED
 
@@ -180,7 +193,7 @@ def group_stage1(judgements: Sequence[DriftJudgement], t: Thresholds) -> GroupSt
 
 
 def route_patch(stage1: GroupStage1, patch: PatchRiskJudgement, t: Thresholds) -> str:
-    """分岐 0, then 1..8, in order (msg-047 as amended by msg-045 / msg-321)."""
+    """分岐 0, then 1..8, in order (msg-047 as amended by msg-045 / msg-321 / msg-328; 分岐 3 vacant)."""
     # 0. the stage-1 classes differ within the group: settled before any other branch
     if stage1.cls == MIXED:
         return OUT_REVIEW_MIXED_GROUP
@@ -194,19 +207,17 @@ def route_patch(stage1: GroupStage1, patch: PatchRiskJudgement, t: Thresholds) -
     behaviour = patch.changes_behavior_description
     claim = patch.introduces_claim_not_in_code
     assert behaviour is not None and claim is not None
-    # 3. any stage-2 answer is not confident
-    if min(behaviour.confidence, claim.confidence) < t.min_confidence:
-        return OUT_REVIEW
-    # 4. a confident hallucination: no PR, findings only (stage 2 alone decides)
-    if claim.value >= t.findings_only_min_claim_risk:
+    # 3. vacant (removed by msg-328 F1(b): a noul answer has no confidence)
+    # 4. a likely hallucination: no PR, findings only (stage 2 alone decides, non-mixed groups only)
+    if claim >= t.findings_only_min_claim_risk:
         return OUT_FINDINGS_ONLY
     # 5. either risk over the auto ceiling
-    if behaviour.value > t.auto_pr_max_risk or claim.value > t.auto_pr_max_risk:
+    if behaviour > t.auto_pr_max_risk or claim > t.auto_pr_max_risk:
         return OUT_REVIEW
     # 6. stage 1 missing or not confident (never hit by exempt)
     if stage1.cls in (CLASS_NO_SIGNAL, CLASS_SIGNAL_LOW_CONF):
         return OUT_REVIEW
-    # 7. auto only when every condition holds explicitly
+    # 7. auto only when every condition holds explicitly (stage-1 drift confidence only; none from stage 2)
     stage1_ok = stage1.cls == CLASS_EXEMPT or (
         stage1.cls == CLASS_SIGNAL
         and stage1.drift_confidence is not None
@@ -214,9 +225,9 @@ def route_patch(stage1: GroupStage1, patch: PatchRiskJudgement, t: Thresholds) -
     )
     if (
         stage1_ok
-        and behaviour.value <= t.auto_pr_max_risk
-        and claim.value <= t.auto_pr_max_risk
-        and claim.value < t.findings_only_min_claim_risk
+        and behaviour <= t.auto_pr_max_risk
+        and claim <= t.auto_pr_max_risk
+        and claim < t.findings_only_min_claim_risk
     ):
         return OUT_AUTO
     # 8. default-deny

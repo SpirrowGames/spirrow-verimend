@@ -6,8 +6,11 @@
 --                applies only 'enforce' rows; an 'observe' row is a record and
 --                never changes what is published, whatever mode publishes later.
 --   decision_id  Lexora's id for the judgement, the join key into Lexora's
---                decisions.db (the evaluation's source of truth). NULL when no
---                call was made or it returned no signal.
+--                decisions.db (the evaluation's source of truth): under
+--                Lexora's shadow mode the answering row is provider 'null' and
+--                the evaluated answers are on decisions.shadow_of = this id.
+--                NULL only when no call was made (exempt) or no well-formed
+--                response came back (transport failure, non-2xx, malformed).
 --   patch_sha256 SHA-256 of the patch_draft the patch_risk row judged. publish
 --                applies the row only while it matches the current draft.
 --   outcome      see the CHECK list.
