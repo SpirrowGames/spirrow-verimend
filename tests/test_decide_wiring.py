@@ -208,6 +208,23 @@ def test_all_findings_only_opens_no_pr(conn, remotes, gh, tmp_path) -> None:
     assert gh.calls == []
 
 
+def test_findings_survive_a_missing_base_commit(conn, remotes, gh, tmp_path) -> None:
+    remotes.create(A)
+    run = make_run(conn, {A: {"error": "checkout failed"}})
+    kept = add_draft(conn, run, A, (3, 3))
+    hallucinated = add_draft(conn, run, A, (9, 9), claim="the made-up claim")
+    _row(conn, kept, "auto")
+    _row(conn, hallucinated, "findings_only")
+    prs = publish_prs(conn, run, config(remotes, gh, tmp_path))
+    assert prs[A]["reason"] == "no_base_commit"
+    assert prs[A]["findings_only"] == [hallucinated]
+    with open(prs[A]["findings_path"], encoding="utf-8") as f:
+        assert "the made-up claim" in f.read()
+    stats = json.loads(conn.execute("SELECT stats_json FROM crawl_run WHERE id = ?", (run,)).fetchone()[0])
+    assert stats["mend"]["findings_only"] == {A: [hallucinated]}
+    assert gh.calls == [] and mend_stage_failed(stats["mend"])
+
+
 def test_a_label_failure_keeps_the_pr_and_makes_the_run_partial(conn, remotes, gh, tmp_path) -> None:
     run = make_run(conn, {A: {"commit": remotes.create(A)}})
     verdict = add_draft(conn, run, A)

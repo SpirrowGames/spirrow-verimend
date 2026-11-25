@@ -332,7 +332,7 @@ def _publish_repo(
     base_commit = target.get("commit")
     if not base_commit:
         log.error("%s: %d drafts but no recorded commit; not published", repo, len(drafts))
-        return {"mode": config.mode, "reason": REASON_NO_BASE_COMMIT}
+        return {"mode": config.mode, "reason": REASON_NO_BASE_COMMIT, **findings_record}
     record: dict[str, Any] = {"mode": config.mode, "base_commit": base_commit, "url": None, **findings_record}
     if prior.get("pushed"):
         record.update(branch=prior["branch"], pushed=True)

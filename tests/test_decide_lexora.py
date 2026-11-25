@@ -122,6 +122,9 @@ def bad(**changes):
         body(bad(drift__score=-0.1)),
         body(bad(drift__legend={"0": "a"})),
         body(bad(drift__legend=["a", "b"])),  # not the legend that was sent
+        body(bad(drift__legend=["a", "b", "c", "d"])),  # same length, other labels
+        body(bad(drift__legend=list(reversed(DRIFT_LEVELS)), drift__score=0.0, drift__confidence=0.95)),  # reversed
+        body(bad(drift__legend=[*DRIFT_LEVELS[:2], DRIFT_LEVELS[3], DRIFT_LEVELS[2]])),  # two levels swapped
         body(bad(drift__legend=[1, 2, 3, 4])),
         body({"drift": "2", "mapping_correct": {"noul": 0.5}}),
     ],

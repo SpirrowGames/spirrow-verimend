@@ -172,9 +172,10 @@ def _answer_ok(spec: dict[str, Any], raw: object) -> bool:
         ):
             return False
         # Verimend reads the score as a level on the legend it sent: a different
-        # legend or a position off it cannot be read as one.
+        # legend (other labels, other length, or the same labels in another
+        # order) or a position off it cannot be read as one.
         criteria = spec.get("criteria")
-        if isinstance(criteria, list) and len(legend) != len(criteria):
+        if isinstance(criteria, list) and legend != list(criteria):
             return False
         return 0.0 <= score <= len(legend) - 1
     return False  # Verimend asks only noul / score questions
