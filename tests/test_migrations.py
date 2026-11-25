@@ -10,8 +10,8 @@ from verimend.claims import CLAIM_TYPES
 from verimend.db import apply_migrations, connection, migrate, pending_migrations
 from verimend.db.migrate import MIGRATIONS_DIR
 
-EXPECTED_TABLES = {"crawl_run", "fact", "claim", "verdict", "document", "schema_migration"}
-ALL_VERSIONS = ["0001_crawl_run_and_fact", "0002_claim_and_verdict", "0003_document"]
+EXPECTED_TABLES = {"crawl_run", "fact", "claim", "verdict", "document", "decision", "schema_migration"}
+ALL_VERSIONS = ["0001_crawl_run_and_fact", "0002_claim_and_verdict", "0003_document", "0004_decision"]
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
@@ -384,3 +384,36 @@ def test_document_table_has_the_cache_key_and_a_status_check(tmp_path: Path) -> 
             conn.execute(insert, (run_id, "d0.md", "extracted"))
         conn.execute("DELETE FROM crawl_run WHERE id = ?", (run_id,))
         assert conn.execute("SELECT count(*) FROM document").fetchone()[0] == 0
+
+
+def test_decision_table_records_mode_and_patch_and_checks_its_enums(tmp_path: Path) -> None:
+    """0004: one row per verdict and stage, the mode it was judged in, the patch it judged."""
+    migrate(tmp_path / "v.sqlite3")
+    with connection(tmp_path / "v.sqlite3") as conn:
+        assert _columns(conn, "decision") == [
+            "id",
+            "verdict_id",
+            "stage",
+            "mode",
+            "decision_id",
+            "patch_sha256",
+            "outcome",
+            "created_at",
+        ]
+        run_id, claim_id = _run_and_claim(conn)
+        verdict_id = conn.execute(
+            "INSERT INTO verdict (claim_id, result, method, evidence_json) VALUES (?, 'stale', 'llm', '{}')",
+            (claim_id,),
+        ).lastrowid
+        insert = "INSERT INTO decision (verdict_id, stage, mode, outcome, created_at) VALUES (?, ?, ?, ?, 't')"
+        conn.execute(insert, (verdict_id, "drift", "observe", "exempt"))
+        conn.execute(insert, (verdict_id, "patch_risk", "enforce", "review_mixed_group"))
+        for stage, mode, outcome in (
+            ("render", "enforce", "auto"),
+            ("drift", "off", "auto"),
+            ("drift", "enforce", "maybe"),
+        ):
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(insert, (verdict_id, stage, mode, outcome))
+        conn.execute("DELETE FROM crawl_run WHERE id = ?", (run_id,))
+        assert conn.execute("SELECT count(*) FROM decision").fetchone()[0] == 0

@@ -184,6 +184,12 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
   - PR 本文は 60,000 文字で切り、切った分は「ほか N 件」と件数だけ書く。文書やファクト由来の文字列はコードスパンに入れる（メンションや Issue の自動クローズを起こさない）
   - `pr_base`（`targets.yaml`）: PR のベースブランチ。省略時はリポジトリの default branch
   - `VERIMEND_GIT_AUTHOR_NAME` / `VERIMEND_GIT_AUTHOR_EMAIL`: commit の author。空は Settings の検証で弾く
+- Lexora `/v1/decide` の判定（T06、スレッド `T-decide-drift-score`。`verimend/decide/`）:
+  - `VERIMEND_DECIDE_MODE` = `off`（既定。Lexora を呼ばず `decision` 行も作らない）| `observe`（呼んで記録するだけ）| `enforce`（スキップと振り分けを適用する）。閾値は `VERIMEND_DECIDE_DRIFT_MIN_LEVEL`（1）/ `_MIN_MAPPING_CORRECT`（0.40）/ `_AUTO_PR_MAX_RISK`（0.25）/ `_MIN_CONFIDENCE`（0.60）/ `_FINDINGS_ONLY_MIN_CLAIM_RISK`（0.75）。知らない `VERIMEND_DECIDE_*` は起動時に弾く
+  - 判定 1（verdict ごと、草案の前）: `drift`（score、4 段階）と `mapping_correct`（noul）。決定的 verdict は呼ばずに `exempt`。`enforce` で確信のある `skip_drift` / `skip_mapping` だけが草案を作らせない。信号なし（`provider = null`・送受信の失敗・形の不正）と低確信は決してスキップしない
+  - 判定 2（group ごと、草案の後）: `changes_behavior_description` / `introduces_claim_not_in_code`（どちらも noul、confidence 無し）。分岐 0（判定 1 の状態が混在する group は `review_mixed_group`）を先に決め、分岐 1〜8 を順に評価する。分岐 3 は欠番（msg-328 の裁定で判定 2 の confidence 条件を外した）
+  - 記録: `decision`（`verdict_id, stage, mode, decision_id, patch_sha256, outcome`）。判定 2 の行は草案と同じトランザクションで書く。`decision_id` は Lexora `decisions.db` との結合キー（shadow 行は `shadow_of`、`verimend/decide/evaluate.py`）
+  - publish が使うのは `mode = enforce` かつ現在の草案の `patch_sha256` と一致する行だけ。`findings_only` は PR に入れず `<repo>__findings.md` と `stats_json.mend.findings_only` に出す（全部なら `reason = all_findings_only`）。ラベルは review > なし > auto で、`gh pr edit --add-label`。失敗は `label_error` で run を `partial` にする
 - 自動適用（PRを経ない直接 commit）は v1 では実装しない。全修正が PR 経由。マージ率の実績が出た後、決定的検証済みカテゴリのみ v2 で検討
 - unverifiable と大規模乖離（同一ドキュメントで stale が閾値超え）は chatroom に1スレッドでまとめて投稿
 
@@ -231,6 +237,7 @@ metric(run_id, prs_opened, prs_merged, prs_edited_before_merge, ...)
 - **M2**: extractor + reconciler。ゴールデンセットで precision/recall 計測できる。対象に spirrow-voxelworld を追加
 - **M3**: mender。手動トリガーで end-to-end に PR が立つ
 - **M4**: systemd 定期実行 + エスカレーション + service_health 組込み + Magickit 薄ツール
+  - T06 の findings 報告（`stats_json.mend.findings_only` と `<repo>__findings.md`）を M4 のエスカレーションに付け替えることは、スレッド `T-decide-drift-score` で追跡する
 
 ## 10. リスクと対策
 

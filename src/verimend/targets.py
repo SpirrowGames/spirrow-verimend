@@ -81,6 +81,10 @@ def _glob_must_stay_in_repository(glob: str) -> None:
             raise ValueError(f"doc glob must stay inside the repository: {glob!r}")
 
 
+# Vendored skill documentation describes another product, not the target's code (msg-324 gap 3).
+DEFAULT_EXCLUDE_GLOBS = (".claude/skills/typesafe-ai/**",)
+
+
 class Target(BaseModel):
     """One crawl target."""
 
@@ -88,6 +92,13 @@ class Target(BaseModel):
 
     repo: str = Field(pattern=REPO_PATTERN, description="GitHub repository as owner/name.")
     doc_globs: list[str] = Field(min_length=1, description="Documentation globs, relative to the repository root.")
+    exclude_globs: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_EXCLUDE_GLOBS),
+        description=(
+            "Documents matching these globs are not extracted (T06, thread T-decide-drift-score). Omitted means "
+            "DEFAULT_EXCLUDE_GLOBS; an explicit [] excludes nothing. Fact collection is not affected."
+        ),
+    )
     extractors: dict[ExtractorName, bool] = Field(
         default_factory=dict,
         description="Fact extractor enable/disable flags. Omitted extractors are disabled.",
@@ -98,7 +109,7 @@ class Target(BaseModel):
         description="Branch the mender's pull requests target. Omitted means the repository's default branch.",
     )
 
-    @field_validator("doc_globs")
+    @field_validator("doc_globs", "exclude_globs")
     @classmethod
     def _globs_must_be_relative(cls, globs: list[str]) -> list[str]:
         for glob in globs:

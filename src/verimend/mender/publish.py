@@ -36,6 +36,23 @@ Per repository:
 Failures stay with their repository (``publish_error = {stage, detail}``, stage
 ``worktree`` | ``push`` | ``pr_create``) and make the run ``partial``, as
 ``no_base_commit`` does. Drafts and verdicts are never changed here.
+
+**判定 2 (T06, ``verimend.decide``).** A draft's outcome is its verdicts' latest
+``decision`` row with ``stage = 'patch_risk'``, ``mode = 'enforce'`` and the
+SHA-256 of the current ``patch_draft``. Any other row -- ``observe``, or one
+about a different patch -- is ignored, whatever ``decide_mode`` publishes now,
+so a draft with no applicable row is published exactly as before T06.
+
+- ``findings_only``: the draft is kept out of the PR and listed in
+  ``<artefact_dir>/run-<id>/<repo>__findings.md`` (``findings_path``) and in
+  ``stats.mend.findings_only[<repo>]``. A repository whose every draft is
+  findings_only gets no PR (``reason = all_findings_only``).
+- the label: ``verimend.decide.routing.pr_label`` over the applied drafts
+  (review > no label > auto), recorded as ``label`` when there is one. ``dry_run`` writes it on
+  the first line of the body file; ``github`` adds it with ``gh pr edit
+  --add-label`` after the PR exists. The labels must already exist in the
+  repository; a failure is ``label_error`` and makes the run ``partial``, the
+  PR stays.
 """
 
 from __future__ import annotations
@@ -53,6 +70,8 @@ from pathlib import Path
 from typing import Any
 
 from verimend.collector.facts import canonical_json
+from verimend.decide.routing import MODE_ENFORCE, OUT_FINDINGS_ONLY, STAGE_PATCH_RISK, pr_label
+from verimend.decide.stage import patch_sha256
 
 log = logging.getLogger(__name__)
 
@@ -62,11 +81,13 @@ MODE_GITHUB = "github"
 REASON_NO_DRAFTS = "no_drafts"
 REASON_ALL_SKIPPED = "all_skipped"
 REASON_NO_BASE_COMMIT = "no_base_commit"
+REASON_ALL_FINDINGS_ONLY = "all_findings_only"
 SKIP_APPLY_CONFLICT = "apply_conflict"
 
 STAGE_WORKTREE = "worktree"
 STAGE_PUSH = "push"
 STAGE_PR_CREATE = "pr_create"
+STAGE_LABEL = "label"
 
 BODY_MAX_CHARS = 60_000
 FACT_SUMMARY_MAX = 200
@@ -133,6 +154,11 @@ class _Draft:
     verdict_ids: tuple[int, ...]
     patch: str
     items: tuple[PrItem, ...]
+    outcomes: tuple[str | None, ...] = ()  # per verdict: the applicable enforce patch_risk outcome, or None
+
+    @property
+    def findings_only(self) -> bool:
+        return OUT_FINDINGS_ONLY in self.outcomes
 
     @property
     def verdict_id(self) -> int:
@@ -293,11 +319,21 @@ def _publish_repo(
 ) -> dict[str, Any]:
     if not drafts:
         return {"mode": config.mode, "reason": REASON_NO_DRAFTS}
+    findings = [d for d in drafts if d.findings_only]
+    drafts = [d for d in drafts if not d.findings_only]
+    findings_record: dict[str, Any] = {}
+    if findings:
+        findings_record = {
+            "findings_only": [i for d in findings for i in d.verdict_ids],
+            "findings_path": str(_write_findings(config.artefact_dir, run_id, repo, findings)),
+        }
+    if not drafts:
+        return {"mode": config.mode, "reason": REASON_ALL_FINDINGS_ONLY, **findings_record}
     base_commit = target.get("commit")
     if not base_commit:
         log.error("%s: %d drafts but no recorded commit; not published", repo, len(drafts))
-        return {"mode": config.mode, "reason": REASON_NO_BASE_COMMIT}
-    record: dict[str, Any] = {"mode": config.mode, "base_commit": base_commit, "url": None}
+        return {"mode": config.mode, "reason": REASON_NO_BASE_COMMIT, **findings_record}
+    record: dict[str, Any] = {"mode": config.mode, "base_commit": base_commit, "url": None, **findings_record}
     if prior.get("pushed"):
         record.update(branch=prior["branch"], pushed=True)
     try:
@@ -333,9 +369,13 @@ def _publish_in_worktree(
         applied, skipped = _apply(git, drafts)
         record.update(applied=[i for d in applied for i in d.verdict_ids], skipped=skipped)
         if not applied:
+            kept = {k: record[k] for k in ("findings_only", "findings_path") if k in record}
             record.clear()
-            record.update(mode=config.mode, reason=REASON_ALL_SKIPPED, skipped=skipped)
+            record.update(mode=config.mode, reason=REASON_ALL_SKIPPED, skipped=skipped, **kept)
             return
+        label = pr_label(o for d in applied for o in (d.outcomes or (None,)))
+        if label is not None:
+            record["label"] = label
         items = [item for d in applied for item in d.items]
         by_id = {i: d.item for d in drafts for i in d.verdict_ids}
         not_applied = [
@@ -357,7 +397,8 @@ def _publish_in_worktree(
                 "commit", "-q", "-m", f"{_title(date)}\n\nVerimend run {run_id}, {len(applied)} 件。",
             )
         if config.mode != MODE_GITHUB:
-            record["body_path"] = str(_write_body(config.artefact_dir, run_id, repo, body))
+            head = f"Label: {label}\n\n" if label is not None else ""
+            record["body_path"] = str(_write_body(config.artefact_dir, run_id, repo, head + body))
             return
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         raise _StageError(STAGE_WORKTREE, _describe(exc)) from exc
@@ -366,6 +407,12 @@ def _publish_in_worktree(
         _twice(STAGE_PUSH, lambda: git("push", "-q", "origin", f"HEAD:refs/heads/{record['branch']}"))
         record["pushed"] = True
     record["url"] = _twice(STAGE_PR_CREATE, lambda: _gh_pr_create(repo, pr_base, record["branch"], date, body, config))
+    if label is not None:
+        try:
+            _twice(STAGE_LABEL, lambda: _gh_add_label(repo, record["url"], label, config))
+        except _StageError as exc:
+            log.error("%s: could not add label %s to %s: %s", repo, label, record["url"], exc.detail)
+            record["label_error"] = exc.detail
 
 
 def _apply(git: "_Git", drafts: Sequence[_Draft]) -> tuple[list[_Draft], list[dict[str, Any]]]:
@@ -409,6 +456,14 @@ def _gh_pr_create(repo: str, base: str, branch: str, date: str, body: str, confi
     if not url.startswith("http"):
         raise OSError(f"gh pr create printed no URL: {url!r}")
     return url
+
+
+def _gh_add_label(repo: str, url: str, label: str, config: PublishConfig) -> None:
+    subprocess.run(
+        [config.gh_bin, "pr", "edit", url, "--repo", repo, "--add-label", label],
+        check=True, capture_output=True, timeout=config.timeout_s,
+        env={**os.environ, "GH_PROMPT_DISABLED": "1"},
+    )
 
 
 def _twice(stage: str, action):
@@ -458,6 +513,25 @@ def _write_body(artefact_dir: Path, run_id: int, repo: str, body: str) -> Path:
     return path
 
 
+def _write_findings(artefact_dir: Path, run_id: int, repo: str, findings: Sequence[_Draft]) -> Path:
+    """The findings_only drafts of a repository: not in any PR, for a person to read (T06)."""
+    fence = "`" * 3
+    parts = [
+        f"# Verimend findings: {repo} (run {run_id})\n",
+        "判定 2 で introduces_claim_not_in_code が高かった修正案です。PR には含めていません。\n",
+    ]
+    for draft in findings:
+        item = draft.item
+        ids = ", ".join(str(i) for i in draft.verdict_ids)
+        parts.append(f"## {_where(item.doc_path, item.anchor)} (verdict {ids})\n")
+        parts.extend(f"- {_code(i.claim_text)}" for i in draft.items)
+        parts.append(f"\n{fence}diff\n" + draft.patch.rstrip("\n") + f"\n{fence}\n")
+    path = Path(artefact_dir) / f"run-{run_id}" / f"{repo.replace('/', '__')}__findings.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(parts), encoding="utf-8", newline="\n")
+    return path
+
+
 def _title(date: str) -> str:
     return f"docs: Verimend によるドキュメント修正 ({date})"
 
@@ -490,7 +564,10 @@ def _run_row(conn: sqlite3.Connection, run_id: int) -> tuple[str, dict[str, Any]
 
 def _record(conn: sqlite3.Connection, run_id: int, repo: str, record: dict[str, Any]) -> None:
     _, stats = _run_row(conn, run_id)
-    stats.setdefault("mend", {}).setdefault("prs", {})[repo] = record
+    mend = stats.setdefault("mend", {})
+    mend.setdefault("prs", {})[repo] = record
+    if record.get("findings_only"):
+        mend.setdefault("findings_only", {})[repo] = record["findings_only"]
     conn.execute("UPDATE crawl_run SET stats_json = ? WHERE id = ?", (canonical_json(stats), run_id))
     conn.commit()
 
@@ -512,9 +589,24 @@ def _drafts(conn: sqlite3.Connection, run_id: int) -> dict[str, list[_Draft]]:
         grouped.setdefault((repo, path, start, end, patch), []).append((verdict_id, item))
     out: dict[str, list[_Draft]] = {}
     for (repo, *_, patch), members in grouped.items():
-        draft = _Draft(tuple(i for i, _ in members), patch, tuple(item for _, item in members))
+        ids = tuple(i for i, _ in members)
+        sha = patch_sha256(patch)
+        draft = _Draft(ids, patch, tuple(item for _, item in members), tuple(_outcome(conn, i, sha) for i in ids))
         out.setdefault(repo, []).append(draft)
     return out
+
+
+def _outcome(conn: sqlite3.Connection, verdict_id: int, sha: str) -> str | None:
+    """The latest enforce patch_risk outcome about exactly this patch, or None (published as before T06)."""
+    row = conn.execute(
+        """
+        SELECT outcome FROM decision
+        WHERE verdict_id = ? AND stage = ? AND mode = ? AND patch_sha256 = ?
+        ORDER BY id DESC LIMIT 1
+        """,
+        (verdict_id, STAGE_PATCH_RISK, MODE_ENFORCE, sha),
+    ).fetchone()
+    return row[0] if row else None
 
 
 def _rejected_structure(conn: sqlite3.Connection, run_id: int, ids: Sequence[int]) -> dict[str, list[NotApplied]]:

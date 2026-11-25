@@ -23,6 +23,17 @@ verify + mend。検証と修正を毎晩回すことで、ドキュメントが�
 - **長コンテキストに頼らない**: 照合は検索で絞った小さな単位で実行する
 - **周辺は既存プラットフォームに委譲**: LLM推論=Lexora / ドキュメント取得=Prismind / GitHub操作=Magickit / エスカレーション=Conclair chatroom
 
+## 運用: Lexora decide の判定
+
+`VERIMEND_DECIDE_MODE` の既定は `off` で、Lexora の `/v1/decide` は呼ばず、挙動も変わりません。
+有効にする順序は次のとおりです（スレッド `T-decide-drift-score`、2026-11-17 の裁定）。
+
+1. `off`（コードの既定値）
+2. `observe`: 判定を `decision` テーブルに記録するだけで、何も変えない。本番で有効にするのは課金の判断（Tier-C `cost`）で、deploy 権限の確認（ADR-24）を経る
+3. `enforce`: 判定 1 が確信のある「乖離なし」をスキップし、判定 2 が PR にラベルを付け、`findings_only` の草案を PR から外す。切り替えは `observe` の記録を見たうえで Takahito が別に判断する
+
+`enforce` で `github` に公開する前に、対象リポジトリに `verimend:auto` と `verimend:review` のラベルを作っておくこと。ラベルが無いと `label_error` として記録し、run は `partial` になります。
+
 ## ステータス
 
 実装フェーズ（M1）。実装済み: FastAPI（:8118 の `/health`）、`crawl_run` / `fact` の
